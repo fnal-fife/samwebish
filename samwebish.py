@@ -232,7 +232,7 @@ class Definitions(ClientCacheMixin):
     """dispatcher and methods for /api/definitions paths"""
 
     @router.get("/sam/{experiment}/api/definitions/list")
-    def list(self, experiment,  defname="", user="", group="", after="", before="", format="", request:Request):
+    def list(self, experiment,  defname="", user="", group="", after="", before="", format="", request:Request=None):
         client = self.client_cache.getmc_client(request)
         if not defname:
             defname = "*"
@@ -254,7 +254,7 @@ class Definitions(ClientCacheMixin):
         return "\n".join([x["name"] for x in dlist])
 
     @router.post("/sam/{experiment}/api/definitions/create")
-    def create(self, experiment, defname, dims, user, group=None, request:Request):
+    def create(self, experiment, defname, dims, user, group=None, request:Request=None):
         client = self.client_cache.getmc_client(request)
         mq = SAM_query_to_MetaCat(dims)
         client.create_named_query(self.namespace, defname, mq)
@@ -304,7 +304,7 @@ Definition Name: {defname}
         return json.dumps(sdict)
 
     @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/list")
-    def files_list(self, experiment, defname="", format="", request:Request):
+    def files_list(self, experiment, defname="", format="", request:Request=None):
         client = self.client_cache.getmc_client(request)
         res = list(client.query(f"files selected by {self.namespace}:{defname}"))
         logger.info(f"{res=}")
@@ -322,7 +322,7 @@ class Files(ClientCacheMixin):
         return SAM_query_to_MetaCat(dims)
 
     @router.get("/sam/{experiment}/api/files/list")
-    def list(self, experiment, dims="", fileinfo="", request:Request):
+    def list(self, experiment, dims="", fileinfo="", request:Request=None):
         mquery = self.convert_sam_query(dims)
         logger.info(f"list: converted {dims=} to {mquery=}")
         client = self.client_cache.getmc_client(request)
@@ -349,7 +349,7 @@ class Files(ClientCacheMixin):
         return json.dumps(sdict)
 
     @router.get("/sam/{experiment}/api/files/name/{name}/locations")
-    def get_name_locations(self, experiment:str, name:str="", request:Request):
+    def get_name_locations(self, experiment:str, name:str="", request:Request=None):
         logger.info(f"get_name_locations {name=}")
         rpclient = self.client_cache.getrrp_client(request)
         data = list(rpclient.list_replicas([{"scope": self.namespace, "name": name}]))
@@ -372,7 +372,7 @@ class Files(ClientCacheMixin):
         return res
 
     @router.put("/sam/{experiment}/api/files/name/{name}/locations")
-    def put_name_locations(self, experiment, file, add="", remove="", request:Request):
+    def put_name_locations(self, experiment, file, add="", remove="", request:Request=None):
         rpclient = self.client_cache.getrrp_client(request)
         mcclient = self.client_cache.getmc_client(request)
 
@@ -397,7 +397,7 @@ class Files(ClientCacheMixin):
         return "ok"
 
     @router.get("/sam/{experiment}/api/files/name/{name}/metadata")
-    def get_name_metadata(self, experiment, name=None, format="plain", request:Request):
+    def get_name_metadata(self, experiment, name=None, format="plain", request:Request=None):
         mcclient = self.client_cache.getmc_client(request)
         metadata = mcclient.get_file(
             name=name, namespace=self.namespace, with_metadata=True
@@ -408,7 +408,7 @@ class Files(ClientCacheMixin):
         else:
             return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
 
-    def traverse_linage(self, mcclient, name, ltype, raw=False, request:Request):
+    def traverse_linage(self, mcclient, name, ltype, raw=False, request:Request=None):
         data = mcclient.get_file(
             name=name, namespace=self.namespace, with_provenance=True
         )
@@ -429,7 +429,7 @@ class Files(ClientCacheMixin):
         return res
 
     @router.get("/sam/{experiment}/api/files/name/{name}/lineage/{ltype}")
-    def lineage(self, name, ltype, format="plain", request:Request):
+    def lineage(self, name, ltype, format="plain", request:Request=None):
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client(request)
         data = mcclient.get_file(
@@ -619,7 +619,7 @@ class Projects(ClientCacheMixin):
             return ""
 
     @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/updateFileStatus")
-    def updateFileStatus( self, experiment, process_id, project_id, status="consumed", filename, request:Request):
+    def updateFileStatus( self, experiment, process_id, project_id, status="consumed", filename=None, request:Request=None):
         logger.info(
             f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
         )
@@ -757,14 +757,13 @@ class Api(ClientCacheMixin):
         experiment,
         name,
         station,
-        request:Request,
         username=None,
         subject=None,
         defname=None,
         def_id=None,
         snapshot_id=None,
         group=None,
-        request:Request,
+        request:Request=None,
     ):
         ddclient = self.client_cache.getdd_client(request)
         mcclient = self.client_cache.getmc_client(request)

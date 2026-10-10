@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 import base64
 import json
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, APIRouter
 from fastapi_utils.cbv  import cbv
-from fastapi_utils.iinferring_router import InferringRouter
+from fastapi_utils.inferring_router import InferringRouter
 import os
 import os.path
 import re
 import time
 import threading
 import traceback
+
 
 from version import samwebish_version
 from data_dispatcher.api import DataDispatcherClient
@@ -24,8 +25,14 @@ from rucio.client.replicaclient import ReplicaClient
 from query_converter.parse_tree import SAM_query_to_MetaCat
 from metadata_converter import MetadataConverter
 
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(filename='samwebish.log', level=logging.DEBUG)
+
+
 app = FastAPI()
-router = InferringRouter()
+#router = InferringRouter()
+router = APIRouter()
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # classes for authentication, client connection caching
@@ -53,19 +60,26 @@ class ClientCache:
         self.token_offset = len("Bearer ")
         self.rucio_env_lock = threading.Lock()
 
-    def get_scitoken(self):
+    # needs to be get_scitoken(self, request:Request):
+    # and all the methods that call it (which is most of them) need a request:Request param
+    # which they pass here, until then stubbing out for basic testgin
+    def get_scitoken(self, request:Request ):
         """extract scitoken from Authorization: header"""
-        print(f"headers: {cherrypy.request.headers}")
-        authheader = cherrypy.request.headers.get("Authorization", "")
-        if not authheader:
-            raise cherrypy.HTTPError(401, "SciToken athentication required")
-        return authheader[self.token_offset :]
+        #print(f"headers: {request.headers}")
+        #authheader = headers.get("Authorization", "")
+        #if not authheader:
+        #    raise cherrypy.HTTPError(401, "SciToken athentication required")
+        #return authheader[self.token_offset :]
+        return ""
 
     def cheap_decode_token(self, scitok):
         """extract json data from jwt token without validating, etc."""
 
-        tp = scitok.split(".")
-        return json.loads(base64.b64decode(tp[1] + "==", altchars="_-"))
+        if scitok:
+            tp = scitok.split(".")
+            return json.loads(base64.b64decode(tp[1] + "==", altchars="_-"))
+        else:
+            return {"sub":"", "scope":""}
 
     def get_username(self, scitok):
         """get username from scitoken"""
@@ -81,22 +95,22 @@ class ClientCache:
         # note that this username guess isn't actually used except to log
         # into backend services...
 
-        cherrypy.log(f"get_username: {scitok=}")
+        logger.info(f"get_username: {scitok=}")
         decoded = self.cheap_decode_token(scitok)
-        cherrypy.log(f'checking subject: {decoded["sub"]}')
+        logger.info(f'checking subject: {decoded["sub"]}')
         m = self.subj_user_re.match(decoded["sub"])
         if m:
-            cherrypy.log(f"Returning: {m.group(1)}")
+            logger.info(f"Returning: {m.group(1)}")
             return m.group(1)
-        cherrypy.log(f'checking scope: {decoded["scope"]}')
+        logger.info(f'checking scope: {decoded["scope"]}')
         m = self.scope_user_re.search(decoded["scope"])
         if m:
-            cherrypy.log(f"Returning: {m.group(1)}")
+            logger.info(f"Returning: {m.group(1)}")
             return m.group(1)
-        cherrypy.log(f"Returning: None!")
+        logger.info(f"Returning: None!")
         return None
 
-    def getdd_client(self):
+    def getdd_client(self, request:Request):
         """get DataDispatcherClient for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.ddccache or self.ddcexp[scitok] < time.time():
@@ -111,7 +125,7 @@ class ClientCache:
             self.ddcexp[scitok] = time.time() + 300
         return self.ddccache[scitok]
 
-    def getmc_client(self):
+    def getmc_client(self, request:Request):
         """get MetaCatClient for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.mcccache or self.mccexp[scitok] < time.time():
@@ -128,7 +142,7 @@ class ClientCache:
             self.mccexp[scitok] = time.time() + 300
         return self.mcccache[scitok]
 
-    def getr_client(self):
+    def getr_client(self, request:Request):
         """get rucio Client for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.rccache or self.mccexp[scitok] < time.time():
@@ -146,17 +160,17 @@ class ClientCache:
                     )
                     self.rccache[scitok].whoami()
                     del os.environ["BEARER_TOKEN"]
-                cherrypy.log(f"getr_client: {self.rccache[scitok]=}")
+                logger.info(f"getr_client: {self.rccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
-                cherrypy.log(f"Exception: {traceback.format_exc()}")
+                logger.info(f"Exception: {traceback.format_exc()}")
                 raise cherrypy.HTTPError(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rcexp[scitok] = time.time() + 300
         return self.rccache[scitok]
 
-    def getrrp_client(self):
+    def getrrp_client(self, request:Request):
         """get rucio Client for this client"""
         scitok = self.get_scitoken()
         if not scitok in self.rrpccache or self.rrpcexp[scitok] < time.time():
@@ -171,11 +185,11 @@ class ClientCache:
                     auth_type="oidc", creds={"user": username}
                 )
                 del os.environ["BEARER_TOKEN"]
-                cherrypy.log(f"getrrp_client: {self.rrpccache[scitok]=}")
+                logger.info(f"getrrp_client: {self.rrpccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
-                cherrypy.log(f"Exception: {traceback.format_exc()}")
+                logger.info(f"Exception: {traceback.format_exc()}")
                 raise cherrypy.HTTPError(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rrpcexp[scitok] = time.time() + 300
@@ -218,8 +232,8 @@ class Definitions(ClientCacheMixin):
     """dispatcher and methods for /api/definitions paths"""
 
     @router.get("/sam/{experiment}/api/definitions/list")
-    def list(self, experiment,  defname="", user="", group="", after="", before="", format=""):
-        client = self.client_cache.getmc_client()
+    def list(self, experiment,  defname="", user="", group="", after="", before="", format="", request:Request):
+        client = self.client_cache.getmc_client(request)
         if not defname:
             defname = "*"
         query = f"queries matching {self.namespace}:{defname}"
@@ -234,26 +248,26 @@ class Definitions(ClientCacheMixin):
             query = f"{query} {sep} created_timestamp<'{before}'"
             sep = "and"
 
-        cherrypy.log(f"searching with {query=}")
+        logger.info(f"searching with {query=}")
         dlist = list(client.search_named_queries(query))
-        cherrypy.log(f"got back {dlist=}")
+        logger.info(f"got back {dlist=}")
         return "\n".join([x["name"] for x in dlist])
 
     @router.post("/sam/{experiment}/api/definitions/create")
-    def create(self, experiment, defname, dims, user, group=none):
-        client = self.client_cache.getmc_client()
+    def create(self, experiment, defname, dims, user, group=None, request:Request):
+        client = self.client_cache.getmc_client(request)
         mq = SAM_query_to_MetaCat(dims)
         client.create_named_query(self.namespace, defname, mq)
 
     @router.delete("/sam/{experiment}/api/definitions/name/{defname}")
-    def delete(self, experiment, defname ):
+    def delete(self, experiment, defname , request:Request):
         raise NotImplementedError()
 
     @router.get("/sam/{experiment}/api/definitions/name/{defname}")
-    def get(self, experiment,  defname, format="json"):
-        client = self.client_cache.getmc_client()
+    def get(self, experiment,  defname, format="json", request:Request=None):
+        client = self.client_cache.getmc_client(request)
         res = client.get_named_query(self.namespace, defname)
-        cherrypy.log(f"got {res=} for {defname=}")
+        logger.info(f"got {res=} for {defname=}")
         if format == "plain":
             res = f"""
 Definition Name: {defname}
@@ -266,13 +280,13 @@ Definition Name: {defname}
         return res
 
     @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/count")
-    def files_count(self, experiment, defname):
+    def files_count(self, experiment, defname, request:Request):
         sdict = self.summary(defname)
-        cherrypy.log(f"got {sdict=} {sdict['count']}")
+        logger.info(f"got {sdict=} {sdict['count']}")
         return str(sdict["count"])
 
-    def summary(self, defname):
-        client = self.client_cache.getmc_client()
+    def summary(self, defname, request:Request):
+        client = self.client_cache.getmc_client(request)
         res = list(
             client.query(
                 f"files selected by {self.namespace}:{defname}", summary="count"
@@ -281,19 +295,19 @@ Definition Name: {defname}
         return res
 
     @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/summary")
-    def files_summary(self, experiment, defname):
+    def files_summary(self, experiment, defname, request:Request):
         sdict = self.summary(defname)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
         sdict["total_event_count"] = 0
-        cherrypy.log(f"{sdict=}")
+        logger.info(f"{sdict=}")
         return json.dumps(sdict)
 
     @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/list")
-    def files_list(self, experiment, defname="", format=""):
-        client = self.client_cache.getmc_client()
+    def files_list(self, experiment, defname="", format="", request:Request):
+        client = self.client_cache.getmc_client(request)
         res = list(client.query(f"files selected by {self.namespace}:{defname}"))
-        cherrypy.log(f"{res=}")
+        logger.info(f"{res=}")
         if format == "json":
             return json.dumps(res)
         else:
@@ -308,38 +322,38 @@ class Files(ClientCacheMixin):
         return SAM_query_to_MetaCat(dims)
 
     @router.get("/sam/{experiment}/api/files/list")
-    def list(self, experiment, dims="", fileinfo="", **kwargs):
+    def list(self, experiment, dims="", fileinfo="", request:Request):
         mquery = self.convert_sam_query(dims)
-        cherrypy.log(f"list: converted {dims=} to {mquery=}")
-        client = self.client_cache.getmc_client()
+        logger.info(f"list: converted {dims=} to {mquery=}")
+        client = self.client_cache.getmc_client(request)
         res = client.query(mquery)
         return "\n".join([x["name"] for x in res])
 
     @router.get("/sam/{experiment}/api/files/count")
-    def count(self, experiment, dims, **kwargs):
+    def count(self, experiment, dims, request:Request):
         return self._summary(dims)["count"]
 
-    def _summary(self, dims, **kwargs):
+    def _summary(self, dims, request:Request):
         mquery = self.convert_sam_query(dims)
-        client = self.client_cache.getmc_client()
+        client = self.client_cache.getmc_client(request)
         res = list(client.query(mquery, summary="count"))[0]
         return res
 
     @router.get("/sam/{experiment}/api/files/summary")
-    def summary(self, experiment, dims, **kwargs):
+    def summary(self, experiment, dims, request:Request):
         sdict = self._summary(dims)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
         sdict["total_event_count"] = 0
-        cherrypy.log(f"{sdict=}")
+        logger.info(f"{sdict=}")
         return json.dumps(sdict)
 
     @router.get("/sam/{experiment}/api/files/name/{name}/locations")
-    def get_name_locations(self, experiment, name="", **kwargs):
-        cherrypy.log(f"get_name_locations {name=}")
-        rpclient = self.client_cache.getrrp_client()
+    def get_name_locations(self, experiment:str, name:str="", request:Request):
+        logger.info(f"get_name_locations {name=}")
+        rpclient = self.client_cache.getrrp_client(request)
         data = list(rpclient.list_replicas([{"scope": self.namespace, "name": name}]))
-        cherrypy.log(f"get_name_locations: {data=}")
+        logger.info(f"get_name_locations: {data=}")
         if not data:
             return "[]"
             # raise cherrypy.HTTPError(404, 'Location not found')
@@ -354,13 +368,13 @@ class Files(ClientCacheMixin):
         else:
             res = json.dumps(res)
 
-        cherrypy.log(f"get_name_locations: {res=}")
+        logger.info(f"get_name_locations: {res=}")
         return res
 
     @router.put("/sam/{experiment}/api/files/name/{name}/locations")
-    def put_name_locations(self, experiment, file, add="", remove=""):
-        rpclient = self.client_cache.getrrp_client()
-        mcclient = self.client_cache.getmc_client()
+    def put_name_locations(self, experiment, file, add="", remove="", request:Request):
+        rpclient = self.client_cache.getrrp_client(request)
+        mcclient = self.client_cache.getmc_client(request)
 
         if add:
             samloc = add
@@ -382,9 +396,9 @@ class Files(ClientCacheMixin):
             # also not an api call to remove just one replica on an rse...
         return "ok"
 
-    @router.get("/sam/{experiment}/api/files/name/{name}/locations")
-    def get_name_metadata(self, experiment, name=None, format="plain"):
-        mcclient = self.client_cache.getmc_client()
+    @router.get("/sam/{experiment}/api/files/name/{name}/metadata")
+    def get_name_metadata(self, experiment, name=None, format="plain", request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         metadata = mcclient.get_file(
             name=name, namespace=self.namespace, with_metadata=True
         )
@@ -394,7 +408,7 @@ class Files(ClientCacheMixin):
         else:
             return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
 
-    def traverse_linage(self, mcclient, name, ltype, raw=False):
+    def traverse_linage(self, mcclient, name, ltype, raw=False, request:Request):
         data = mcclient.get_file(
             name=name, namespace=self.namespace, with_provenance=True
         )
@@ -415,9 +429,9 @@ class Files(ClientCacheMixin):
         return res
 
     @router.get("/sam/{experiment}/api/files/name/{name}/lineage/{ltype}")
-    def lineage(self, name, ltype, format="plain"):
+    def lineage(self, name, ltype, format="plain", request:Request):
         # ltype is: parents, children, rawancestors
-        mcclient = self.client_cache.getmc_client()
+        mcclient = self.client_cache.getmc_client(request)
         data = mcclient.get_file(
             name=file, namespace=self.namespace, with_provenance=True
         )
@@ -435,11 +449,11 @@ class Files(ClientCacheMixin):
         else:
             return "\n".join(res)
 
-    @router.post("/sam/{experiment}/api/files", metadata_text)
-    def post(self, experiment, metadata_text):
+    @router.post("/sam/{experiment}/api/files")
+    def post(self, experiment, metadata_text, request:Request):
         """declare a file..."""
         metadata = json.loads(metadata_text)
-        mcclient = self.client_cache.getmc_client()
+        mcclient = self.client_cache.getmc_client(request)
         try:
             mc_metadata = self.mcc.convert_all_sam_mc(
                 metadata, namespace=self.namespace
@@ -454,8 +468,8 @@ class Files(ClientCacheMixin):
         return ""
 
     @router.post("/sam/{experiment}/api/files/validate_metadata")
-    def validate_metadata(self, experiment, metadata_text):
-        mcclient = self.client_cache.getmc_client()
+    def validate_metadata(self, experiment, metadata_text, request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         try:
@@ -466,8 +480,8 @@ class Files(ClientCacheMixin):
             raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
 
     @router.put("/sam/{experiment}/api/files/name/{name}/metadata")
-    def put_name_metadata(self, experiment, name, metadata_text):
-        mcclient = self.client_cache.getmc_client()
+    def put_name_metadata(self, experiment, name, metadata_text, request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         did = f"{self.default_dataset}:{name}"
@@ -476,25 +490,25 @@ class Files(ClientCacheMixin):
         return ""
 
     @router.put("/sam/{experiment}/api/files/id/{file_id}/metadata")
-    def put_id_metadata(self, experiment, file_id, metadata_text):
-        mcclient = self.client_cache.getmc_client()
+    def put_id_metadata(self, experiment, file_id, metadata_text, request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         mcclient.update_file_metadata(mc_metadata["metadata"], fids=[file_id])
         cherrypy.response.status = 204
         return ""
 
-    @router.put("/sam/{experiment}/api/files/name/{name}/metadata")
-    def put_name_content_status(self, experiment, name, metadata_text)
+    @router.put("/sam/{experiment}/api/files/name/{name}/content_status")
+    def put_name_content_status(self, experiment, name, metadata_text, request:Request):
         status = cherrypy.request.body
-        mcclient = self.client_cache.getmc_client()
+        mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
         mcclient.update_file_metadata({"core.content_status": status}, fids=[file_id])
         cherrypy.response.status = 204
         return ""
 
-    @router.put("/sam/{experiment}/api/files/id/{file_id}/metadata")
-    def put_id_content_status(self, experiment, file_id, metadata_text):
+    @router.put("/sam/{experiment}/api/files/id/{file_id}/content_status")
+    def put_id_content_status(self, experiment, file_id, metadata_text, request:Request):
         status = cherrypy.request.body
         metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
@@ -538,20 +552,20 @@ class Values(ClientCacheMixin):
     """dispatcher and methods for /api/values paths"""
 
     @router.get("/sam/{experiment}/api/values/parameters")
-    def get_parameters(self, experiment):
-        mcclient = self.client_cache.getmc_client()
+    def get_parameters(self, experiment, request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         keylist = list(mcclient.report_metadata_keys())
         return "\n".join(keylist)
 
     @router.post("/sam/{experiment}/api/values/parameters")
-    def post_parameters(self, experimient, name, category, data_type):
+    def post_parameters(self, experimient, name, category, data_type, request:Request):
         # don't need to pre-post parameters in MetaCat, so
         cherrypy.response.status = 204
         return ""
 
     @router.get("/sam/{experiment}/api/values/applications")
-    def get_applications(self, experiment):
-        mcclient = self.client_cache.getmc_client()
+    def get_applications(self, experiment, request:Request):
+        mcclient = self.client_cache.getmc_client(request)
         vlist = mcclient.report_metadata_values("app.version")
         flist = mcclient.report_metadata_values("app.family")
         nlist = mcclient.report_metadata_values("app.name")
@@ -565,7 +579,7 @@ class Values(ClientCacheMixin):
         return "\n".join(res)
 
     @router.post("/sam/{experiment}/api/values/applications")
-    def post_applications(self, experiment, family, name, version):
+    def post_applications(self, experiment, family, name, version, request:Request):
         # don't need to pre-post applications in MetaCat, so
         # just say its "ok"...
         cherrypy.response.status = 204
@@ -576,23 +590,23 @@ class Values(ClientCacheMixin):
 class Projects(ClientCacheMixin):
     """dispatcher and methods for /api/project paths"""
 
-    def __init__(self):
+    def __init__(self, request:Request):
         ClientCacheMixin.__init__(self)
         self.last_process_file = {}
         self.project_finished = {}
 
-    @router.post("/sam/{experiment}/project/{project_id}")
-    def establishProcess(self, experiment, project_id=None, appname, appversion, deliverylocation, username=None, subject=None, appfamily=None, description=None, filelimit=None, schemas=None):
-        ddclient = self.client_cache.getdd_client()
-        cherrypy.log("establishProcess...")
+    @router.post("/sam/{experiment}/api/project/{project_id}")
+    def establishProcess(self, experiment, project_id, appname, appversion, deliverylocation, username=None, subject=None, appfamily=None, description=None, filelimit=None, schemas=None, request:Request=None):
+        ddclient = self.client_cache.getdd_client(request)
+        logger.info("establishProcess...")
         return ddclient.new_worker_id()
 
-    @router.post("/sam/{experiment}/project/{project_id}/process/{process_id}/getNextFile")
-    def getNextFile(self, experiment, project_id, process_id):
-        ddclient = self.client_cache.getdd_client()
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/getNextFile")
+    def getNextFile(self, experiment, project_id, process_id, request:Request):
+        ddclient = self.client_cache.getdd_client(request)
         res = ddclient.next_file(project_id=project_id, worker_id=process_id)
         # just return the url from the first replica
-        cherrypy.log(f"next_file gives: {res=}")
+        logger.info(f"next_file gives: {res=}")
         if res:
             rname, rdict = list(res["replicas"].items())[0]
             name = res["name"]
@@ -604,14 +618,14 @@ class Projects(ClientCacheMixin):
             cherrypy.response.status = 204
             return ""
 
-    @router.post("/sam/{experiment}/project/{project_id}/process/{process_id}/updateFileStatus")
-    def updateFileStatus( self, experiment, process_id, project_id, status="consumed", filename=None ):
-        cherrypy.log(
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/updateFileStatus")
+    def updateFileStatus( self, experiment, process_id, project_id, status="consumed", filename, request:Request):
+        logger.info(
             f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
         )
         if cherrypy.request.method == "POST":
             data = cherrypy.request.body.read()
-            cherrypy.log(f"updateFileStatus: {data=}")
+            logger.info(f"updateFileStatus: {data=}")
         if status == "consumed":
             return self.releaseFile(
                 process_id, "ok", project_id=project_id, filename=filename
@@ -623,16 +637,16 @@ class Projects(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/project/{project_id}/process/{process_id}/releaseFile")
-    def releaseFile(self, process_id, status, project_id=None, filename=None, **kwargs):
-        cherrypy.log(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/releaseFile")
+    def releaseFile(self, process_id, status, project_id, filename, request:Request):
+        logger.info(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
         if not filename and self.last_process_file.get(process_id, ""):
             filename = self.last_process_file[process_id]
             del self.last_process_file[process_id]
         if not filename:
             cherrypy.response.status = 204
             return ""
-        ddclient = self.client_cache.getdd_client()
+        ddclient = self.client_cache.getdd_client(request)
         filename = os.path.basename(filename)
         did = f"{self.namespace}:{filename}"
         if status == "ok":
@@ -642,96 +656,92 @@ class Projects(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/project/{project_id}/process/{process_id}/endProcess")
-    def endProcess(self, experiment, project_id, process_id):
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/endProcess")
+    def endProcess(self, experiment, project_id, process_id, request:Request):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/project/{project_id}/endProject")
-    def endProject(self, experiment, project_id):
+    @router.post("/sam/{experiment}/api/project/{project_id}/endProject")
+    def endProject(self, experiment, project_id, request:Request):
         """if we haven't seen a getNextFile return nothing, cancel it"""
         if project_id not in self.project_finished:
-            ddclient = self.client_cache.getdd_client()
+            ddclient = self.client_cache.getdd_client(request)
             ddclient.cancel_project(project_id)
         cherrypy.response.status = 204
         return ""
 
     # same function for project or process status, which is a put
     # we ignore..
-    @router.put("/sam/{experiment}/project/{project_id}/process/{process_id}/status")
-    def status(self, process_id=None, project_id=None, status=None):
+    @router.put("/sam/{experiment}/api/project/{project_id}/process/{process_id}/status")
+    def status(self, experiment, process_id=None, project_id=None, status=None, request:Request=None):
         pass
 
-    @router.put("/sam/{experiment}/project/{project_id}/status")
-    def status(self, process_id=None, status=None):
+    @router.put("/sam/{experiment}/api/project/{project_id}/status")
+    def status(self, experiment, process_id, status, request:Request):
         pass
 
-    @cherrypy.expose
-    def get(self, project_id=None, **kwargs):
-        ddclient = self.client_cache.getdd_client()
+    @router.get("/sam/{experiment}/api/project/{project_id}/status")
+    def get(self, experiment, project_id, request:Request):
+        ddclient = self.client_cache.getdd_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
-    @cherrypy.expose
-    def dumpProject(self, project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
+    @router.get("/sam/{experiment}/api/project/{project_id}/dumpProject")
+    def dumpProject(self, experiment, project_id, request:Request=None):
+        ddclient = self.client_cache.getmc_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
-    @cherrypy.expose
-    def summary(self, project_id=None, **kwargs):
-        ddclient = self.client_cache.getmc_client()
-        proj = json.dumps(ddclient.get_project(project_id))
+    @router.get("/sam/{experiment}/api/project/name/{name}/summary")
+    def summary(self, experiment, name, request:Request=None):
+        ddclient = self.client_cache.getmc_client(request)
         #  xxx mimic sam Project summary?
-        return json.dumps(ddclient.get_project(project_id))
+        return json.dumps(ddclient.list_projects(attributes={"name":name})[0])
 
-    @cherrypy.expose
-    def recovery_dimensions(self, project_id=None, **kwargs):
-        proj = json.dumps(ddclient.get_project(project_id))
-        return "project {d['attributes']['name']} minus project_status like 'com%'"
+
+    @router.get("/sam/{experiment}/api/project/name/{name}/recovery_dimensions")
+    def recovery_dimensions(self, experiment, name, useFile=0, useProcess=0 , request:Request=None):
+        # wimpy non process version
+        return "project name minus project_status like 'com%'"
 
 
 @cbv(router)
 class Api(ClientCacheMixin):
     """dispatcher and methods for /api/ paths"""
 
-    @cherrypy.expose
-    def index(self, **kwargs):
-        cherrypy.log("test message")
+    @router.get("/sam/{experiment}/api")
+    def index(self,  request:Request=None):
+        logger.info("test message")
         return '{"app":"samwebish", "version": samwebish_version}'
 
-    @cherrypy.expose
-    def createDefinition(self, **kwargs):
-        return Definitions.create(self, **kwargs)
+    @router.get("/sam/{experiment}/api/createDefinition")
+    def createDefinition(self, experiment, name, dims, user="" , request:Request=None):
+        return Definitions.create(self, experiment, name, dims, user, request)
 
-    @cherrypy.expose
-    def deleteDefinition(self, **kwargs):
-        return Definitions.delete(self, **kwargs)
+    @router.get("/sam/{experiment}/api/deleteDefinition")
+    def deleteDefinition(self, experiment, name , request:Request=None):
+        return Definitions.delete(self, experiment, name, request)
 
-    @cherrypy.expose
-    def describeDefinition(self, **kwargs):
-        return Definitions.get(self, **kwargs)
+    @router.get("/sam/{experiment}/api/describeDefinition")
+    def describeDefinition(self, experiment, name , request:Request=None):
+        return Definitions.get(self, experiment, name , request)
 
-    @cherrypy.expose
-    def translateConstraints(self, **kwargs):
-        return Files.list(**kwargs)
+    @router.get("/sam/{experiment}/api/translateConstraints")
+    def translateConstraints(self, experiment, dims, format="plain" , request:Request=None):
+        return Files.list(experiment, dims, format, request)
 
-    @cherrypy.expose
-    def locateFile(self, **kwargs):
-        return Files.get_name_locations(self, **kwargs)
+    @router.get("/sam/{experiment}/api/locateFile")
+    def locateFile(self, experiment, file, request:Request):
+        return Files.get_name_locations(self, experiment, file, request)
 
-    @cherrypy.expose
-    def getMetadata(self, **kwargs):
-        return Files.get_name_metadata(self, **kwargs)
+    @router.get("/sam/{experiment}/api/getMetadata")
+    def getMetadata(self, experiment, name , request:Request=None):
+        return Files.get_name_metadata(self, experiment, name, request)
 
-    @cherrypy.expose
-    def setStatus(self, **kwargs):
-        pass
-
-    @cherrypy.expose
-    def dumpStation(self, **kwargs):
-        ddclient = self.client_cache.getdd_client()
+    @router.get("/sam/{experiment}/api/dumpStation")
+    def dumpStation(self, experiment, station, dump="all", request:Request=None):
+        ddclient = self.client_cache.getdd_client(request)
         rlst = list(ddclient.list_projects())
-        cherrypy.log(f"dumpStation: got {rlst=}")
+        logger.info(f"dumpStation: got {rlst=}")
         res = f"samwebish version {samwebish_version}\n{len(rlst)} active projects:\n"
         res += "\n".join(
             [
@@ -741,20 +751,23 @@ class Api(ClientCacheMixin):
         )
         return res
 
-    @cherrypy.expose
+    @router.post("/sam/{experiment}/api/startProject")
     def startProject(
         self,
+        experiment,
         name,
         station,
-        username,
+        request:Request,
+        username=None,
+        subject=None,
         defname=None,
         def_id=None,
         snapshot_id=None,
         group=None,
-        **kwargs,
+        request:Request,
     ):
-        ddclient = self.client_cache.getdd_client()
-        mcclient = self.client_cache.getmc_client()
+        ddclient = self.client_cache.getdd_client(request)
+        mcclient = self.client_cache.getmc_client(request)
         if defname:
             q = f"files selected by {self.namespace}:{defname}"
         if def_id:
@@ -766,36 +779,19 @@ class Api(ClientCacheMixin):
         except BadRequestError:
             raise cherrypy.HTTPError(404, f"Defname {defname} not found")
         sid = f"{self.namespace}:snapshot_for_project_{name}"
-        cherrypy.log(f"startProject: {q=} {sid=} {files=}")
+        logger.info(f"startProject: {q=} {sid=} {files=}")
         ds = mcclient.create_dataset(sid)
         mcclient.add_files(sid, files)
         p = ddclient.create_project(files, project_attributes={"name": name}, query=q)
-        b = cherrypy.request.base
+        b = request.base_url
         return f"{b}/api/projects/id/{p['project_id']}"
 
-    @cherrypy.expose
-    def findProject(self, name, **kwargs):
-        ddclient = self.client_cache.getdd_client()
+    @router.get("/sam/{experiment}/api/findProject")
+    def findProject(self, experiment, name, request:Request ):
+        ddclient = self.client_cache.getdd_client(request)
         pl = list(ddclient.list_projects(attributes={"name": name}))
         p = pl[0]
-        b = cherrypy.request.base
+        b = request.base_url
         return f"{b}/api/projects/id/{p['project_id']}"
 
-
-def main():
-    server_config = {
-        "server.socket_host": "0.0.0.0",
-        "server.socket_port": 9443,
-        "server.ssl_module": "pyopenssl",
-        "server.ssl_certificate": "./certs/server_cert.pem",
-        "server.ssl_private_key": "./certs/server_key.pem",
-    }
-    cherrypy.config.update(server_config)
-    cherrypy.tree.mount(Api(), "/api", {"/": {"tools.trailing_slash.missing": False}})
-
-    cherrypy.engine.start()
-    cherrypy.engine.block()
-
-
-if __name__ == "__main__":
-    main()
+app.include_router(router)

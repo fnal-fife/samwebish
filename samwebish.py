@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import base64
 import json
-from fastapi import FastAPI, Request, Response, APIRouter, responses, HTTPException
+from fastapi import FastAPI, Request, Response, APIRouter, responses, HTTPException, Body
 from fastapi_utils.cbv  import cbv
 from fastapi_utils.inferring_router import InferringRouter
 import os
@@ -10,6 +10,7 @@ import re
 import time
 import threading
 import traceback
+from typing import Annotated, Any, Dict
 
 
 from version import samwebish_version
@@ -120,7 +121,7 @@ class ClientCache:
             try:
                 self.ddccache[scitok].login_token(username, scitok)
             except:
-                raise cherrypy.HTTPError(401, "SciToken athentication failed")
+                raise HTTPException(401, "SciToken athentication failed")
             self.ddcexp[scitok] = time.time() + 300
         return self.ddccache[scitok]
 
@@ -136,7 +137,7 @@ class ClientCache:
             try:
                 self.mcccache[scitok].login_token(username, scitok)
             except:
-                raise cherrypy.HTTPError(401, "SciToken athentication failed")
+                raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.mccexp[scitok] = time.time() + 300
         return self.mcccache[scitok]
@@ -164,7 +165,7 @@ class ClientCache:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
                 logger.info(f"Exception: {traceback.format_exc()}")
-                raise cherrypy.HTTPError(401, "SciToken athentication failed")
+                raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rcexp[scitok] = time.time() + 300
         return self.rccache[scitok]
@@ -189,7 +190,7 @@ class ClientCache:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
                 logger.info(f"Exception: {traceback.format_exc()}")
-                raise cherrypy.HTTPError(401, "SciToken athentication failed")
+                raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rrpcexp[scitok] = time.time() + 300
         return self.rrpccache[scitok]
@@ -355,7 +356,7 @@ class Files(ClientCacheMixin):
         logger.info(f"get_name_locations: {data=}")
         if not data:
             return "[]"
-            # raise cherrypy.HTTPError(404, 'Location not found')
+            # raise HTTPException(404, 'Location not found')
         pfns = data[0]["pfns"]
         res = []
         for pfn, dat in pfns.items():
@@ -449,9 +450,8 @@ class Files(ClientCacheMixin):
             return "\n".join(res)
 
     @router.post("/sam/{experiment}/api/files",response_class=responses.PlainTextResponse)
-    def post(self, experiment, metadata_text, request:Request):
+    def post(self, experiment:str, metadata:Dict[str,Any], request:Request):
         """declare a file..."""
-        metadata = json.loads(metadata_text)
         mcclient = self.client_cache.getmc_client(request)
         try:
             mc_metadata = self.mcc.convert_all_sam_mc(
@@ -459,61 +459,48 @@ class Files(ClientCacheMixin):
             )
             mcclient.declare_files(self.default_dataset, [mc_metadata], self.namespace)
         except AlreadyExistsError as e:
-            raise cherrypy.HTTPError(409, "File already exists")
+            raise HTTPException(409, "File already exists")
         except InvalidMetadataError as e:
-            raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
+            raise HTTPException(400, f"Invalid metadata: {e}")
 
-        cherrypy.response.status = 204
         return ""
 
     @router.post("/sam/{experiment}/api/files/validate_metadata",response_class=responses.PlainTextResponse)
-    def validate_metadata(self, experiment, metadata_text, request:Request):
+    def validate_metadata(self, experiment, metadata: Dict[str,Any], request:Request):
         mcclient = self.client_cache.getmc_client(request)
-        metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         try:
             resp = mcclient.declare_files(files=[mc_metadata], dry_run=True)
-            cherrypy.response.status = 204
             return ""
         except:
-            raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
+            raise HTTPException(400, f"Invalid metadata: {e}")
 
     @router.put("/sam/{experiment}/api/files/name/{name}/metadata",response_class=responses.PlainTextResponse)
-    def put_name_metadata(self, experiment, name, metadata_text, request:Request):
+    def put_name_metadata(self, experiment, name, metadata:Dict[str,Any], request:Request):
         mcclient = self.client_cache.getmc_client(request)
-        metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         did = f"{self.default_dataset}:{name}"
         mcclient.update_file_metadata(mc_metadata["metadata"], dids=[did])
-        cherrypy.response.status = 204
         return ""
 
     @router.put("/sam/{experiment}/api/files/id/{file_id}/metadata",response_class=responses.PlainTextResponse)
-    def put_id_metadata(self, experiment, file_id, metadata_text, request:Request):
+    def put_id_metadata(self, experiment, file_id, metadata:Dict[str,Any], request:Request):
         mcclient = self.client_cache.getmc_client(request)
-        metadata = json.loads(metadata_text)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         mcclient.update_file_metadata(mc_metadata["metadata"], fids=[file_id])
-        cherrypy.response.status = 204
         return ""
 
     @router.put("/sam/{experiment}/api/files/name/{name}/content_status",response_class=responses.PlainTextResponse)
-    def put_name_content_status(self, experiment, name, metadata_text, request:Request):
-        status = cherrypy.request.body
+    def put_name_content_status(self, experiment, name, status:str, request:Request):
         mcclient = self.client_cache.getmc_client(request)
-        metadata = json.loads(metadata_text)
         mcclient.update_file_metadata({"core.content_status": status}, fids=[file_id])
-        cherrypy.response.status = 204
         return ""
 
     @router.put("/sam/{experiment}/api/files/id/{file_id}/content_status",response_class=responses.PlainTextResponse)
-    def put_id_content_status(self, experiment, file_id, metadata_text, request:Request):
-        status = cherrypy.request.body
-        metadata = json.loads(metadata_text)
+    def put_id_content_status(self, experiment, file_id, status:str, request:Request):
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         did = f"{self.default_dataset}:{name}"
         mcclient.update_file_metadata({"core.content_status": status}, dids=[did])
-        cherrypy.response.status = 204
         return ""
 
 
@@ -559,7 +546,6 @@ class Values(ClientCacheMixin):
     @router.post("/sam/{experiment}/api/values/parameters",response_class=responses.PlainTextResponse)
     def post_parameters(self, experimient, name, category, data_type, request:Request):
         # don't need to pre-post parameters in MetaCat, so
-        cherrypy.response.status = 204
         return ""
 
     @router.get("/sam/{experiment}/api/values/applications",response_class=responses.PlainTextResponse)
@@ -581,7 +567,6 @@ class Values(ClientCacheMixin):
     def post_applications(self, experiment, family, name, version, request:Request):
         # don't need to pre-post applications in MetaCat, so
         # just say its "ok"...
-        cherrypy.response.status = 204
         return ""
 
 
@@ -614,7 +599,6 @@ class Projects(ClientCacheMixin):
             return rdict["url"]
         else:
             self.project_finished[project_id] = True
-            cherrypy.response.status = 204
             return ""
 
     @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/updateFileStatus",response_class=responses.PlainTextResponse)
@@ -622,9 +606,6 @@ class Projects(ClientCacheMixin):
         logger.info(
             f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
         )
-        if cherrypy.request.method == "POST":
-            data = cherrypy.request.body.read()
-            logger.info(f"updateFileStatus: {data=}")
         if status == "consumed":
             return self.releaseFile(
                 process_id, "ok", project_id=project_id, filename=filename
@@ -633,7 +614,6 @@ class Projects(ClientCacheMixin):
             return self.releaseFile(
                 process_id, "bad", project_id=project_id, filename=filename
             )
-        cherrypy.response.status = 204
         return ""
 
     @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/releaseFile",response_class=responses.PlainTextResponse)
@@ -643,7 +623,6 @@ class Projects(ClientCacheMixin):
             filename = self.last_process_file[process_id]
             del self.last_process_file[process_id]
         if not filename:
-            cherrypy.response.status = 204
             return ""
         ddclient = self.client_cache.getdd_client(request)
         filename = os.path.basename(filename)
@@ -652,13 +631,11 @@ class Projects(ClientCacheMixin):
             ddclient.file_done(project_id, did, process_id)
         else:
             ddclient.file_failed(project_id, did, process_id)
-        cherrypy.response.status = 204
         return ""
 
     @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/endProcess",response_class=responses.PlainTextResponse)
     def endProcess(self, experiment, project_id, process_id, request:Request):
         # don't need to do this...
-        cherrypy.response.status = 204
         return ""
 
     @router.post("/sam/{experiment}/api/project/{project_id}/endProject",response_class=responses.PlainTextResponse)
@@ -667,7 +644,6 @@ class Projects(ClientCacheMixin):
         if project_id not in self.project_finished:
             ddclient = self.client_cache.getdd_client(request)
             ddclient.cancel_project(project_id)
-        cherrypy.response.status = 204
         return ""
 
     # same function for project or process status, which is a put
@@ -775,7 +751,7 @@ class Api(ClientCacheMixin):
         try:
             files = list(mcclient.query(q))
         except BadRequestError:
-            raise cherrypy.HTTPError(404, f"Defname {defname} not found")
+            raise HTTPException(404, f"Defname {defname} not found")
         sid = f"{self.namespace}:snapshot_for_project_{name}"
         logger.info(f"startProject: {q=} {sid=} {files=}")
         ds = mcclient.create_dataset(sid)

@@ -252,13 +252,13 @@ class Definitions(ClientCacheMixin):
         logger.info(f"got back {dlist=}")
         return "\n".join([x["name"] for x in dlist])
 
-    @router.post("/sam/{experiment}/api/definitions/create")
+    @router.post("/sam/{experiment}/api/definitions/create",response_class=responses.PlainTextResponse)
     def create(self, experiment, defname, dims, user, group=None, request:Request=None):
         client = self.client_cache.getmc_client(request)
         mq = SAM_query_to_MetaCat(dims)
         client.create_named_query(self.namespace, defname, mq)
 
-    @router.delete("/sam/{experiment}/api/definitions/name/{defname}")
+    @router.delete("/sam/{experiment}/api/definitions/name/{defname}",response_class=responses.PlainTextResponse)
     def delete(self, experiment, defname , request:Request):
         raise NotImplementedError()
 
@@ -370,7 +370,7 @@ class Files(ClientCacheMixin):
         logger.info(f"get_name_locations: {res=}")
         return res
 
-    @router.put("/sam/{experiment}/api/files/name/{name}/locations")
+    @router.put("/sam/{experiment}/api/files/name/{name}/locations",response_class=responses.PlainTextResponse)
     def put_name_locations(self, experiment, file, add="", remove="", request:Request=None):
         rpclient = self.client_cache.getrrp_client(request)
         mcclient = self.client_cache.getmc_client(request)
@@ -448,7 +448,7 @@ class Files(ClientCacheMixin):
         else:
             return "\n".join(res)
 
-    @router.post("/sam/{experiment}/api/files")
+    @router.post("/sam/{experiment}/api/files",response_class=responses.PlainTextResponse)
     def post(self, experiment, metadata_text, request:Request):
         """declare a file..."""
         metadata = json.loads(metadata_text)
@@ -466,7 +466,7 @@ class Files(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/api/files/validate_metadata")
+    @router.post("/sam/{experiment}/api/files/validate_metadata",response_class=responses.PlainTextResponse)
     def validate_metadata(self, experiment, metadata_text, request:Request):
         mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
@@ -478,7 +478,7 @@ class Files(ClientCacheMixin):
         except:
             raise cherrypy.HTTPError(400, f"Invalid metadata: {e}")
 
-    @router.put("/sam/{experiment}/api/files/name/{name}/metadata")
+    @router.put("/sam/{experiment}/api/files/name/{name}/metadata",response_class=responses.PlainTextResponse)
     def put_name_metadata(self, experiment, name, metadata_text, request:Request):
         mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
@@ -488,7 +488,7 @@ class Files(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.put("/sam/{experiment}/api/files/id/{file_id}/metadata")
+    @router.put("/sam/{experiment}/api/files/id/{file_id}/metadata",response_class=responses.PlainTextResponse)
     def put_id_metadata(self, experiment, file_id, metadata_text, request:Request):
         mcclient = self.client_cache.getmc_client(request)
         metadata = json.loads(metadata_text)
@@ -497,7 +497,7 @@ class Files(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.put("/sam/{experiment}/api/files/name/{name}/content_status")
+    @router.put("/sam/{experiment}/api/files/name/{name}/content_status",response_class=responses.PlainTextResponse)
     def put_name_content_status(self, experiment, name, metadata_text, request:Request):
         status = cherrypy.request.body
         mcclient = self.client_cache.getmc_client(request)
@@ -506,7 +506,7 @@ class Files(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.put("/sam/{experiment}/api/files/id/{file_id}/content_status")
+    @router.put("/sam/{experiment}/api/files/id/{file_id}/content_status",response_class=responses.PlainTextResponse)
     def put_id_content_status(self, experiment, file_id, metadata_text, request:Request):
         status = cherrypy.request.body
         metadata = json.loads(metadata_text)
@@ -525,7 +525,7 @@ class Users(ClientCacheMixin):
     def get(self, experiment,  username=None, format="plain", status=None):
         raise NotImplementedError()
 
-    @router.post("/sam/{experiment}/api/users/")
+    @router.post("/sam/{experiment}/api/users/",response_class=responses.PlainTextResponse)
     def post(self, experiment, jsondata):
         raise NotImplementedError()
 
@@ -537,11 +537,11 @@ class Users(ClientCacheMixin):
     def get_by_id(self, experiement, uid):
         raise NotImplementedError()
 
-    @router.put("/sam/{experiment}/api/users/name/{name}")
+    @router.put("/sam/{experiment}/api/users/name/{name}",response_class=responses.PlainTextResponse)
     def put_by_name(self, experiment, name, jsondata):
         raise NotImplementedError()
 
-    @router.put("/sam/{experiment}/api/users/id/{uid}")
+    @router.put("/sam/{experiment}/api/users/id/{uid}",response_class=responses.PlainTextResponse)
     def put_by_id(self, experiment, uid, jsondata):
         raise NotImplementedError()
 
@@ -556,7 +556,7 @@ class Values(ClientCacheMixin):
         keylist = list(mcclient.report_metadata_keys())
         return "\n".join(keylist)
 
-    @router.post("/sam/{experiment}/api/values/parameters")
+    @router.post("/sam/{experiment}/api/values/parameters",response_class=responses.PlainTextResponse)
     def post_parameters(self, experimient, name, category, data_type, request:Request):
         # don't need to pre-post parameters in MetaCat, so
         cherrypy.response.status = 204
@@ -577,7 +577,7 @@ class Values(ClientCacheMixin):
                     res.append(f"{f}   {n}    {v}")
         return "\n".join(res)
 
-    @router.post("/sam/{experiment}/api/values/applications")
+    @router.post("/sam/{experiment}/api/values/applications",response_class=responses.PlainTextResponse)
     def post_applications(self, experiment, family, name, version, request:Request):
         # don't need to pre-post applications in MetaCat, so
         # just say its "ok"...
@@ -594,13 +594,13 @@ class Projects(ClientCacheMixin):
         self.last_process_file = {}
         self.project_finished = {}
 
-    @router.post("/sam/{experiment}/api/project/{project_id}")
+    @router.post("/sam/{experiment}/api/project/{project_id}",response_class=responses.PlainTextResponse)
     def establishProcess(self, experiment, project_id, appname, appversion, deliverylocation, username=None, subject=None, appfamily=None, description=None, filelimit=None, schemas=None, request:Request=None):
         ddclient = self.client_cache.getdd_client(request)
         logger.info("establishProcess...")
         return ddclient.new_worker_id()
 
-    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/getNextFile")
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/getNextFile",response_class=responses.PlainTextResponse)
     def getNextFile(self, experiment, project_id, process_id, request:Request):
         ddclient = self.client_cache.getdd_client(request)
         res = ddclient.next_file(project_id=project_id, worker_id=process_id)
@@ -617,7 +617,7 @@ class Projects(ClientCacheMixin):
             cherrypy.response.status = 204
             return ""
 
-    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/updateFileStatus")
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/updateFileStatus",response_class=responses.PlainTextResponse)
     def updateFileStatus( self, experiment, process_id, project_id, status="consumed", filename=None, request:Request=None):
         logger.info(
             f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
@@ -636,7 +636,7 @@ class Projects(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/releaseFile")
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/releaseFile",response_class=responses.PlainTextResponse)
     def releaseFile(self, process_id, status, project_id, filename, request:Request):
         logger.info(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
         if not filename and self.last_process_file.get(process_id, ""):
@@ -655,13 +655,13 @@ class Projects(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/endProcess")
+    @router.post("/sam/{experiment}/api/project/{project_id}/process/{process_id}/endProcess",response_class=responses.PlainTextResponse)
     def endProcess(self, experiment, project_id, process_id, request:Request):
         # don't need to do this...
         cherrypy.response.status = 204
         return ""
 
-    @router.post("/sam/{experiment}/api/project/{project_id}/endProject")
+    @router.post("/sam/{experiment}/api/project/{project_id}/endProject",response_class=responses.PlainTextResponse)
     def endProject(self, experiment, project_id, request:Request):
         """if we haven't seen a getNextFile return nothing, cancel it"""
         if project_id not in self.project_finished:
@@ -672,11 +672,11 @@ class Projects(ClientCacheMixin):
 
     # same function for project or process status, which is a put
     # we ignore..
-    @router.put("/sam/{experiment}/api/project/{project_id}/process/{process_id}/status")
+    @router.put("/sam/{experiment}/api/project/{project_id}/process/{process_id}/status",response_class=responses.PlainTextResponse)
     def status(self, experiment, process_id=None, project_id=None, status=None, request:Request=None):
         pass
 
-    @router.put("/sam/{experiment}/api/project/{project_id}/status")
+    @router.put("/sam/{experiment}/api/project/{project_id}/status",response_class=responses.PlainTextResponse)
     def status(self, experiment, process_id, status, request:Request):
         pass
 
@@ -750,7 +750,7 @@ class Api(ClientCacheMixin):
         )
         return res
 
-    @router.post("/sam/{experiment}/api/startProject")
+    @router.post("/sam/{experiment}/api/startProject",response_class=responses.PlainTextResponse)
     def startProject(
         self,
         experiment,

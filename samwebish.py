@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import base64
 import json
-from fastapi import FastAPI, Request, APIRouter
+from fastapi import FastAPI, Request, Response, APIRouter, responses, HTTPException
 from fastapi_utils.cbv  import cbv
 from fastapi_utils.inferring_router import InferringRouter
 import os
@@ -65,12 +65,11 @@ class ClientCache:
     # which they pass here, until then stubbing out for basic testgin
     def get_scitoken(self, request:Request ):
         """extract scitoken from Authorization: header"""
-        #print(f"headers: {request.headers}")
-        #authheader = headers.get("Authorization", "")
-        #if not authheader:
-        #    raise cherrypy.HTTPError(401, "SciToken athentication required")
-        #return authheader[self.token_offset :]
-        return ""
+        logger.debug(f"headers: {dict(request.headers)}")
+        authheader = request.headers.get("Authorization", "")
+        if not authheader:
+            raise HTTPException(401, "SciToken athentication required")
+        return authheader[self.token_offset :]
 
     def cheap_decode_token(self, scitok):
         """extract json data from jwt token without validating, etc."""
@@ -112,7 +111,7 @@ class ClientCache:
 
     def getdd_client(self, request:Request):
         """get DataDispatcherClient for this client"""
-        scitok = self.get_scitoken()
+        scitok = self.get_scitoken(request)
         if not scitok in self.ddccache or self.ddcexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
@@ -127,7 +126,7 @@ class ClientCache:
 
     def getmc_client(self, request:Request):
         """get MetaCatClient for this client"""
-        scitok = self.get_scitoken()
+        scitok = self.get_scitoken(request)
         if not scitok in self.mcccache or self.mccexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
@@ -144,7 +143,7 @@ class ClientCache:
 
     def getr_client(self, request:Request):
         """get rucio Client for this client"""
-        scitok = self.get_scitoken()
+        scitok = self.get_scitoken(request)
         if not scitok in self.rccache or self.mccexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
@@ -172,7 +171,7 @@ class ClientCache:
 
     def getrrp_client(self, request:Request):
         """get rucio Client for this client"""
-        scitok = self.get_scitoken()
+        scitok = self.get_scitoken(request)
         if not scitok in self.rrpccache or self.rrpcexp[scitok] < time.time():
             username = self.get_username(scitok)
             # set token_file on client to /dev/null so we don't have to
@@ -231,7 +230,7 @@ class ClientCacheMixin:
 class Definitions(ClientCacheMixin):
     """dispatcher and methods for /api/definitions paths"""
 
-    @router.get("/sam/{experiment}/api/definitions/list")
+    @router.get("/sam/{experiment}/api/definitions/list",response_class=responses.PlainTextResponse)
     def list(self, experiment,  defname="", user="", group="", after="", before="", format="", request:Request=None):
         client = self.client_cache.getmc_client(request)
         if not defname:
@@ -263,7 +262,7 @@ class Definitions(ClientCacheMixin):
     def delete(self, experiment, defname , request:Request):
         raise NotImplementedError()
 
-    @router.get("/sam/{experiment}/api/definitions/name/{defname}")
+    @router.get("/sam/{experiment}/api/definitions/name/{defname}",response_class=responses.PlainTextResponse)
     def get(self, experiment,  defname, format="json", request:Request=None):
         client = self.client_cache.getmc_client(request)
         res = client.get_named_query(self.namespace, defname)
@@ -279,9 +278,9 @@ Definition Name: {defname}
 
         return res
 
-    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/count")
+    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/count",response_class=responses.PlainTextResponse)
     def files_count(self, experiment, defname, request:Request):
-        sdict = self.summary(defname)
+        sdict = self.summary(defname, request)
         logger.info(f"got {sdict=} {sdict['count']}")
         return str(sdict["count"])
 
@@ -294,16 +293,16 @@ Definition Name: {defname}
         )[0]
         return res
 
-    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/summary")
+    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/summary",response_class=responses.PlainTextResponse)
     def files_summary(self, experiment, defname, request:Request):
-        sdict = self.summary(defname)
+        sdict = self.summary(defname, request)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
         sdict["total_event_count"] = 0
         logger.info(f"{sdict=}")
         return json.dumps(sdict)
 
-    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/list")
+    @router.get("/sam/{experiment}/api/definitions/name/{defname}/files/list",response_class=responses.PlainTextResponse)
     def files_list(self, experiment, defname="", format="", request:Request=None):
         client = self.client_cache.getmc_client(request)
         res = list(client.query(f"files selected by {self.namespace}:{defname}"))
@@ -321,7 +320,7 @@ class Files(ClientCacheMixin):
     def convert_sam_query(self, dims):
         return SAM_query_to_MetaCat(dims)
 
-    @router.get("/sam/{experiment}/api/files/list")
+    @router.get("/sam/{experiment}/api/files/list",response_class=responses.PlainTextResponse)
     def list(self, experiment, dims="", fileinfo="", request:Request=None):
         mquery = self.convert_sam_query(dims)
         logger.info(f"list: converted {dims=} to {mquery=}")
@@ -329,9 +328,9 @@ class Files(ClientCacheMixin):
         res = client.query(mquery)
         return "\n".join([x["name"] for x in res])
 
-    @router.get("/sam/{experiment}/api/files/count")
+    @router.get("/sam/{experiment}/api/files/count",response_class=responses.PlainTextResponse)
     def count(self, experiment, dims, request:Request):
-        return self._summary(dims)["count"]
+        return self._summary(dims, request)["count"]
 
     def _summary(self, dims, request:Request):
         mquery = self.convert_sam_query(dims)
@@ -339,17 +338,17 @@ class Files(ClientCacheMixin):
         res = list(client.query(mquery, summary="count"))[0]
         return res
 
-    @router.get("/sam/{experiment}/api/files/summary")
+    @router.get("/sam/{experiment}/api/files/summary",response_class=responses.PlainTextResponse)
     def summary(self, experiment, dims, request:Request):
-        sdict = self._summary(dims)
+        sdict = self._summary(dims, request)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
         sdict["total_event_count"] = 0
         logger.info(f"{sdict=}")
         return json.dumps(sdict)
 
-    @router.get("/sam/{experiment}/api/files/name/{name}/locations")
-    def get_name_locations(self, experiment:str, name:str="", request:Request=None):
+    @router.get("/sam/{experiment}/api/files/name/{name}/locations",response_class=responses.PlainTextResponse)
+    def get_name_locations(self, request:Request, experiment:str, name:str="", format:str=""):
         logger.info(f"get_name_locations {name=}")
         rpclient = self.client_cache.getrrp_client(request)
         data = list(rpclient.list_replicas([{"scope": self.namespace, "name": name}]))
@@ -363,7 +362,7 @@ class Files(ClientCacheMixin):
             rse = dat["rse"]
             ploc = pfn.find("/", 9)
             res.append({"location": f"{rse}:{pfn[ploc:]}"})
-        if "format" in kwargs and kwargs["format"] == "plain":
+        if format and format == "plain":
             res = "\n".join(res)
         else:
             res = json.dumps(res)
@@ -396,7 +395,7 @@ class Files(ClientCacheMixin):
             # also not an api call to remove just one replica on an rse...
         return "ok"
 
-    @router.get("/sam/{experiment}/api/files/name/{name}/metadata")
+    @router.get("/sam/{experiment}/api/files/name/{name}/metadata",response_class=responses.PlainTextResponse)
     def get_name_metadata(self, experiment, name=None, format="plain", request:Request=None):
         mcclient = self.client_cache.getmc_client(request)
         metadata = mcclient.get_file(
@@ -428,7 +427,7 @@ class Files(ClientCacheMixin):
                 res.extend(nextgen)
         return res
 
-    @router.get("/sam/{experiment}/api/files/name/{name}/lineage/{ltype}")
+    @router.get("/sam/{experiment}/api/files/name/{name}/lineage/{ltype}",response_class=responses.PlainTextResponse)
     def lineage(self, name, ltype, format="plain", request:Request=None):
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client(request)
@@ -522,7 +521,7 @@ class Files(ClientCacheMixin):
 class Users(ClientCacheMixin):
     """dispatcher and methods for /api/users paths"""
 
-    @router.get("/sam/{experiment}/api/users/")
+    @router.get("/sam/{experiment}/api/users/",response_class=responses.PlainTextResponse)
     def get(self, experiment,  username=None, format="plain", status=None):
         raise NotImplementedError()
 
@@ -530,11 +529,11 @@ class Users(ClientCacheMixin):
     def post(self, experiment, jsondata):
         raise NotImplementedError()
 
-    @router.get("/sam/{experiment}/api/users/name/{name}")
+    @router.get("/sam/{experiment}/api/users/name/{name}",response_class=responses.PlainTextResponse)
     def get_by_name(self, experiment, name):
         raise NotImplementedError()
 
-    @router.get("/sam/{experiment}/api/users/id/{uid}")
+    @router.get("/sam/{experiment}/api/users/id/{uid}",response_class=responses.PlainTextResponse)
     def get_by_id(self, experiement, uid):
         raise NotImplementedError()
 
@@ -551,7 +550,7 @@ class Users(ClientCacheMixin):
 class Values(ClientCacheMixin):
     """dispatcher and methods for /api/values paths"""
 
-    @router.get("/sam/{experiment}/api/values/parameters")
+    @router.get("/sam/{experiment}/api/values/parameters",response_class=responses.PlainTextResponse)
     def get_parameters(self, experiment, request:Request):
         mcclient = self.client_cache.getmc_client(request)
         keylist = list(mcclient.report_metadata_keys())
@@ -563,7 +562,7 @@ class Values(ClientCacheMixin):
         cherrypy.response.status = 204
         return ""
 
-    @router.get("/sam/{experiment}/api/values/applications")
+    @router.get("/sam/{experiment}/api/values/applications",response_class=responses.PlainTextResponse)
     def get_applications(self, experiment, request:Request):
         mcclient = self.client_cache.getmc_client(request)
         vlist = mcclient.report_metadata_values("app.version")
@@ -681,24 +680,24 @@ class Projects(ClientCacheMixin):
     def status(self, experiment, process_id, status, request:Request):
         pass
 
-    @router.get("/sam/{experiment}/api/project/{project_id}/status")
+    @router.get("/sam/{experiment}/api/project/{project_id}/status",response_class=responses.PlainTextResponse)
     def get(self, experiment, project_id, request:Request):
         ddclient = self.client_cache.getdd_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
-    @router.get("/sam/{experiment}/api/project/{project_id}/dumpProject")
+    @router.get("/sam/{experiment}/api/project/{project_id}/dumpProject",response_class=responses.PlainTextResponse)
     def dumpProject(self, experiment, project_id, request:Request=None):
         ddclient = self.client_cache.getmc_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
-    @router.get("/sam/{experiment}/api/project/name/{name}/summary")
+    @router.get("/sam/{experiment}/api/project/name/{name}/summary",response_class=responses.PlainTextResponse)
     def summary(self, experiment, name, request:Request=None):
         ddclient = self.client_cache.getmc_client(request)
         #  xxx mimic sam Project summary?
         return json.dumps(ddclient.list_projects(attributes={"name":name})[0])
 
 
-    @router.get("/sam/{experiment}/api/project/name/{name}/recovery_dimensions")
+    @router.get("/sam/{experiment}/api/project/name/{name}/recovery_dimensions",response_class=responses.PlainTextResponse)
     def recovery_dimensions(self, experiment, name, useFile=0, useProcess=0 , request:Request=None):
         # wimpy non process version
         return "project name minus project_status like 'com%'"
@@ -708,36 +707,36 @@ class Projects(ClientCacheMixin):
 class Api(ClientCacheMixin):
     """dispatcher and methods for /api/ paths"""
 
-    @router.get("/sam/{experiment}/api")
+    @router.get("/sam/{experiment}/api",response_class=responses.PlainTextResponse)
     def index(self,  request:Request=None):
         logger.info("test message")
         return '{"app":"samwebish", "version": samwebish_version}'
 
-    @router.get("/sam/{experiment}/api/createDefinition")
+    @router.get("/sam/{experiment}/api/createDefinition",response_class=responses.PlainTextResponse)
     def createDefinition(self, experiment, name, dims, user="" , request:Request=None):
         return Definitions.create(self, experiment, name, dims, user, request)
 
-    @router.get("/sam/{experiment}/api/deleteDefinition")
+    @router.get("/sam/{experiment}/api/deleteDefinition",response_class=responses.PlainTextResponse)
     def deleteDefinition(self, experiment, name , request:Request=None):
         return Definitions.delete(self, experiment, name, request)
 
-    @router.get("/sam/{experiment}/api/describeDefinition")
+    @router.get("/sam/{experiment}/api/describeDefinition",response_class=responses.PlainTextResponse)
     def describeDefinition(self, experiment, name , request:Request=None):
         return Definitions.get(self, experiment, name , request)
 
-    @router.get("/sam/{experiment}/api/translateConstraints")
+    @router.get("/sam/{experiment}/api/translateConstraints",response_class=responses.PlainTextResponse)
     def translateConstraints(self, experiment, dims, format="plain" , request:Request=None):
         return Files.list(experiment, dims, format, request)
 
-    @router.get("/sam/{experiment}/api/locateFile")
+    @router.get("/sam/{experiment}/api/locateFile",response_class=responses.PlainTextResponse)
     def locateFile(self, experiment, file, request:Request):
         return Files.get_name_locations(self, experiment, file, request)
 
-    @router.get("/sam/{experiment}/api/getMetadata")
+    @router.get("/sam/{experiment}/api/getMetadata",response_class=responses.PlainTextResponse)
     def getMetadata(self, experiment, name , request:Request=None):
         return Files.get_name_metadata(self, experiment, name, request)
 
-    @router.get("/sam/{experiment}/api/dumpStation")
+    @router.get("/sam/{experiment}/api/dumpStation",response_class=responses.PlainTextResponse)
     def dumpStation(self, experiment, station, dump="all", request:Request=None):
         ddclient = self.client_cache.getdd_client(request)
         rlst = list(ddclient.list_projects())
@@ -785,7 +784,7 @@ class Api(ClientCacheMixin):
         b = request.base_url
         return f"{b}/api/projects/id/{p['project_id']}"
 
-    @router.get("/sam/{experiment}/api/findProject")
+    @router.get("/sam/{experiment}/api/findProject",response_class=responses.PlainTextResponse)
     def findProject(self, experiment, name, request:Request ):
         ddclient = self.client_cache.getdd_client(request)
         pl = list(ddclient.list_projects(attributes={"name": name}))

@@ -3,19 +3,21 @@
 start_server() {
     (
       . ./testdata/setup.sh
-      python samwebish.py > server.out 2>&1 &
-      echo $! > server.pid
+      nginx -p $PWD -e logs/nginx_error_log -c testdata/nginx.conf
+      fastapi dev --entrypoint samwebish:app > logs/fastapi_dev.log &
+      echo $! > logs/server.pid
     )
 
     sleep 1
-    if kill -0 $(<server.pid)
+    if kill -0 $(<logs/server.pid)
     then
-        succeeded "python samwebish.py &"
+        succeeded fastapi dev --entrypoint samwebish:app 
     else
-        failed "python samwebish.py &" 
+        failed fastapi dev --entrypoint samwebish:app 
         exit
     fi
-    trap "kill $(<server.pid); rm server.pid" 0 1 2 3 4 5 6 7 8
+    trap "kill $(<logs/server.pid) $(<logs/nginx.pid) || true;  rm logs/server.pid" 0 1 2 3 4 5 6 7 8
+
     sleep 1
     # let server wake up...
 }

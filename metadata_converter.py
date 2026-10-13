@@ -362,7 +362,9 @@ class MetadataConverter:
     def convert_all_mc_sam(self, md, prune=True):
         res = {}
         for k, v in md.items():
-            if not k in self.conversion_mc_sam[self.experiment]:
+            if not k:
+                continue
+            if not (k in self.conversion_mc_sam[self.experiment]):
                 continue
             # most keys don't require conversion, except...
             converter = convert_noop
@@ -375,6 +377,7 @@ class MetadataConverter:
                 converter = convert_checksums_mc_sam
             if k in ["created_timestamp", "updated_timestamp"]:
                 converter = convert_date_mc_sam
+            ck = self.conversion_mc_sam[self.experiment][k]
             res[ck] = converter(v, md)
         # some things are in the metadata sub-dictionary...
         # they are listed as metadata:x in the table

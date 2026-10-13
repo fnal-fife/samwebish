@@ -7,3 +7,4 @@ testdata/md_new_file.json
 *.egg-info/
 build/
 dist/
+certs/

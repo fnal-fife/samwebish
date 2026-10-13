@@ -98,7 +98,7 @@ run_expecting()  {
 }
 
 finish_up() {
-    printf "$fail_list"
+    printf "%s" "$fail_list"
     echo
     [ "" = "$fail_list" ]
 }

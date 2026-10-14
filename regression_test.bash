@@ -4,7 +4,7 @@ start_server() {
     (
       . ./testdata/setup.sh
       nginx -p $PWD -e logs/nginx_error_log -c testdata/nginx.conf
-      fastapi dev --entrypoint samwebish:app > logs/fastapi_dev.log &
+      fastapi dev --entrypoint samwebish:app > logs/fastapi_dev.log 2>&1 &
       echo $! > logs/server.pid
     )
 

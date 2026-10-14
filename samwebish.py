@@ -12,6 +12,7 @@ from fastapi import (
     Form,
     status,
 )
+from fastapi.utils import is_body_allowed_for_status_code
 from fastapi_utils.cbv import cbv
 from fastapi.exceptions import RequestValidationError
 import os
@@ -45,13 +46,38 @@ logging.basicConfig(filename="samwebish.log", level=logging.DEBUG)
 app = FastAPI()
 
 
+# override RequestValidationError to log the validation message
+# and also add "message" and "error" tags to response for Samweb client
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
     logging.error(f"{request}: {exc_str}")
-    content = {"status_code": 10422, "message": exc_str, "data": None}
+    exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
+    content = {
+        "status_code": 10422,
+        "message": exc_str,
+        "error": "validation",
+        "data": None,
+    }
     return responses.JSONResponse(
         content=content, status_code=status.HTTP_422_UNPROCESSABLE_ENTITY
+    )
+
+
+# override exception handlers to include "message" as well as "detail"
+# in JSON error responses, to make samweb client happy
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> Response:
+    headers = getattr(exc, "headers", None)
+    if not is_body_allowed_for_status_code(exc.status_code):
+        return Response(status_code=exc.status_code, headers=headers)
+    return responses.JSONResponse(
+        {
+            "detail": exc.detail,
+            "message": exc.detail,
+            "error": "exception",
+        },
+        status_code=exc.status_code,
+        headers=headers,
     )
 
 

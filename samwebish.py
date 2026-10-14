@@ -470,9 +470,9 @@ class Files(ClientCacheMixin):
             )
             mcclient.declare_files(self.default_dataset, [mc_metadata], self.namespace)
         except AlreadyExistsError as e:
-            raise HTTPException(409, "File already exists")
+            raise HTTPException(409, detail="File already exists")
         except InvalidMetadataError as e:
-            raise HTTPException(400, f"Invalid metadata: {e}")
+            raise HTTPException(400, detail=f"Invalid metadata: {e}")
 
         return ""
 
@@ -585,10 +585,13 @@ class Values(ClientCacheMixin):
 class Projects(ClientCacheMixin):
     """dispatcher and methods for /api/project paths"""
 
+    last_process_file = {}
+    last_project_finished = {}
+
     def __init__(self, request:Request):
         ClientCacheMixin.__init__(self)
-        self.last_process_file = {}
-        self.project_finished = {}
+        self.last_process_file = Projects.last_process_file
+        self.project_finished = Projects.last_project_finished
 
     @router.post("/sam/{experiment}/api/project/id/{project_id}/establishProcess",response_class=responses.PlainTextResponse)
     def establishProcess(
@@ -622,6 +625,7 @@ class Projects(ClientCacheMixin):
             name = res["name"]
             namespace = res["namespace"]
             self.last_process_file[process_id] = name
+            logger.info(f"getNextFile: set last_process_file {name}")
             return rdict["url"]
         else:
             self.project_finished[project_id] = True
@@ -647,6 +651,7 @@ class Projects(ClientCacheMixin):
         logger.info(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
         if not filename and self.last_process_file.get(process_id, ""):
             filename = self.last_process_file[process_id]
+            logger.info(f"releaseFile: got last_process_file {filename}")
             del self.last_process_file[process_id]
         if not filename:
             return ""
@@ -675,11 +680,11 @@ class Projects(ClientCacheMixin):
     # same function for project or process status, which is a put
     # we ignore..
     @router.put("/sam/{experiment}/api/project/id/{project_id}/process/{process_id}/status",response_class=responses.PlainTextResponse)
-    def status(self, request:Request, experiment, process_id=None, project_id=None, status=None):
+    def ppstatus(self, request:Request, experiment, process_id=None, project_id=None, status:Annotated[str,Form]=None):
         pass
 
     @router.put("/sam/{experiment}/api/project/id/{project_id}/status",response_class=responses.PlainTextResponse)
-    def status(self, experiment, process_id, status, request:Request):
+    def pstatus(self, experiment, process_id, status:Annotated[str,Form()], request:Request):
         pass
 
     @router.get("/sam/{experiment}/api/project/id/{project_id}/status",response_class=responses.PlainTextResponse)

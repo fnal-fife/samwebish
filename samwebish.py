@@ -40,7 +40,7 @@ from metadata_converter import MetadataConverter
 import logging
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename="samwebish.log", level=logging.DEBUG)
+logging.basicConfig(filename="logs/samwebish.log", level=logging.DEBUG)
 
 
 app = FastAPI()
@@ -1019,5 +1019,9 @@ class Api(ClientCacheMixin):
         b = request.base_url
         return f"{self.base}/sam/{experiment}/api/project/id/{p['project_id']}"
 
-
 app.include_router(router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

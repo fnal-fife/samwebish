@@ -1,1 +1,1 @@
-samwebish_version="0.3-alpha"
+samwebish_version = "0.3-alpha"

@@ -24,9 +24,10 @@ setup(
         "fastapi",
         "fastapi-utils",
         "fastapi-cgi",
+        "cryptograhy",
         "pyparsing",
         "metacat-client",
         "datadispatcher-client",
         "rucio-clients",
-    ]
+    ],
 )

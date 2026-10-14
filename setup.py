@@ -21,16 +21,13 @@ setup(
     packages=["query_converter"],
     python_requires=">=3.7",
     install_requires=[
-        "CherryPy",
-        "pyOpenSSL",
+        "fastapi",
+        "fastapi-utils",
+        "fastapi-cgi",
+        "cryptograhy",
         "pyparsing",
         "metacat-client",
-        "datadispatcher",
+        "datadispatcher-client",
         "rucio-clients",
     ],
-    entry_points={
-        "console_scripts": [
-            "samwebish=samwebish:main",
-        ],
-    },
 )

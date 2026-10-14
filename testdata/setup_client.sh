@@ -1,8 +1,9 @@
 . $SPACK_ROOT/setup-env.sh
-spack env activate samwebish
 
-export SAM_WEB_BASE_URL=https://localhost:9443/api
-export IFDH_BASE_URI=https://localhost:9443/api
+spack load --first sam-web-client@3.6
+
+export SAM_WEB_BASE_URL=https://localhost:8483/sam/hypot/api
+export IFDH_BASE_URI=https://localhost:8483/sam/hypot/api
 export SAM_EXPERIMENT=hypot
 
-htgettoken 
+htgettoken -i hypot -a htvaultprod.fnal.gov

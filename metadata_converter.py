@@ -328,11 +328,15 @@ class MetadataConverter:
                 v = self.conversion_mc_sam[k][k2]
                 self.conversion_sam_mc[k][v] = k2
 
-    def convert_all_sam_mc(self, md, namespace):
+    def convert_all_sam_mc(self, md, namespace, prune=True):
         res = {"namespace": namespace, "metadata": {}}
         for k, v in md.items():
             if not k in self.conversion_sam_mc[self.experiment]:
-                continue
+                if k.find(".") == -1 or prune:
+                    continue
+                ck = k
+            else:
+                ck = self.conversion_sam_mc[self.experiment][k]
             # most things need no conversion, except...
             converter = convert_noop
             if k == "file_id":
@@ -347,7 +351,6 @@ class MetadataConverter:
                 converter = convert_date_sam_mc
             # in metacat, some things are in the metadata sub-dictionary
             # in this case the conversion key starts with metadata:
-            ck = self.conversion_sam_mc[self.experiment][k]
             if ck.startswith("metadata:"):
                 ck = ck.replace("metadata:", "")
                 res["metadata"][ck] = converter(v)
@@ -356,12 +359,13 @@ class MetadataConverter:
 
         return res
 
-    def convert_all_mc_sam(self, md):
+    def convert_all_mc_sam(self, md, prune=True):
         res = {}
         for k, v in md.items():
-            if not k in self.conversion_mc_sam[self.experiment]:
+            if not k:
                 continue
-            ck = self.conversion_mc_sam[self.experiment][k]
+            if not (k in self.conversion_mc_sam[self.experiment]):
+                continue
             # most keys don't require conversion, except...
             converter = convert_noop
             if k == "fid":
@@ -373,14 +377,18 @@ class MetadataConverter:
                 converter = convert_checksums_mc_sam
             if k in ["created_timestamp", "updated_timestamp"]:
                 converter = convert_date_mc_sam
+            ck = self.conversion_mc_sam[self.experiment][k]
             res[ck] = converter(v, md)
         # some things are in the metadata sub-dictionary...
         # they are listed as metadata:x in the table
         for k, v in md["metadata"].items():
             converter = convert_noop
             if not ("metadata:" + k) in self.conversion_mc_sam[self.experiment]:
-                continue
-            ck = self.conversion_mc_sam[self.experiment]["metadata:" + k]
+                if prune or k.find(".") == -1:
+                    continue
+                ck = k
+            else:
+                ck = self.conversion_mc_sam[self.experiment]["metadata:" + k]
             if ck == "runs":
                 converter = convert_runs_mc_sam
             if not ck == "run_type":

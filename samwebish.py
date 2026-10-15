@@ -271,7 +271,7 @@ class ClientCacheMixin:
         self.default_dataset = "mengel:all"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT", ""))
         # XXX needs to come from config...
-        self.base = "https://localhost:8483"
+        self.base = f"https://{os.uname().nodename}:8483"
 
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

@@ -1,5 +1,5 @@
 
-. /scratch/mengel/fastapi-test/venv/bin/activate
+. venv/bin/activate
 
 export METACAT_SERVER_URL=https://metacat.fnal.gov:9443/hypot_meta_dev/app
 export DATA_DISPATCHER_URL=https://metacat.fnal.gov:9443/hypot_dd/data

@@ -24,7 +24,7 @@ setup(
         "fastapi",
         "fastapi-utils",
         "fastapi-cli",
-        "cryptograhy",
+        "cryptography",
         "pyparsing",
         "metacat-client",
         "datadispatcher-client",

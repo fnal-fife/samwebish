@@ -23,7 +23,7 @@ setup(
     install_requires=[
         "fastapi",
         "fastapi-utils",
-        "fastapi-cgi",
+        "fastapi-cli",
         "cryptograhy",
         "pyparsing",
         "metacat-client",

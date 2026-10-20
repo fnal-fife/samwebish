@@ -15,6 +15,8 @@ from fastapi import (
 from fastapi.utils import is_body_allowed_for_status_code
 from fastapi_utils.cbv import cbv
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
+
 import os
 import os.path
 import re
@@ -44,6 +46,28 @@ logging.basicConfig(filename="logs/samwebish.log", level=logging.DEBUG)
 
 
 app = FastAPI()
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="Samwebish",
+        version="0.0.4",
+        description="JWT Authentication and Authorization",
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT"
+        }
+    }
+    openapi_schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 
 # override RequestValidationError to log the validation message

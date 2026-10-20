@@ -53,7 +53,7 @@ def custom_openapi():
     openapi_schema = get_openapi(
         title="Samwebish",
         version="0.0.4",
-        description="JWT Authentication and Authorization",
+        description="SAM API for Metacat/Rucio\n\nTo authorize, paste encoded token in Authorize popup",
         routes=app.routes,
     )
     openapi_schema["components"]["securitySchemes"] = {

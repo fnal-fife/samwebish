@@ -186,8 +186,6 @@ def _meta_infix_render(op, nodes, precedence):
         if i > 0:
             yield op
         if n:
-            if op == "-" and not is_set_level_node(n):
-                 yield "files where"
             r = n.meta_render()
         else:
             r = []
@@ -195,6 +193,8 @@ def _meta_infix_render(op, nodes, precedence):
         addparens = _determine_needs_parens(i, n, precedence, associativity)
         if addparens:
             yield "("
+        if op == "-" and not is_set_level_node(n):
+             yield "files where"
         for t in r:
             yield t
         if addparens:
@@ -332,11 +332,15 @@ class SetNode(BinaryOperatorNode, NegatableNode):
             logging.debug(f"{self.nodes=}")
             if self.nodes[0]:
                 logging.debug(f"meta_rendering {self.nodes[0]=}")
+                if not is_set_level_node(self.nodes[0]):
+                    yield "files where"
                 for x in self.nodes[0].meta_render():
                     yield x
                 return
             else:
                 logging.debug(f"meta_rendering {self.nodes[1]=}")
+                if not is_set_level_node(self.nodes[1]):
+                    yield "files where"
                 for x in self.nodes[1].meta_render():
                     yield x
                 return
@@ -489,8 +493,10 @@ class AvailabilityNode(NodeBase):
         return hash(tuple(self.flags))
 
     def meta_render(self):
-        yield "availability:"
-        yield ",".join(_quote_value(v) for v in self.flags)
+        return
+        # for now, ignoring availability...
+        # yield "availability:"
+        # yield ",".join(_quote_value(v) for v in self.flags)
 
     def render(self):
         yield "availability:"
@@ -672,8 +678,8 @@ class DimNode(NegatableNode):
         name = re.sub("^(create|update)_date$", "\\1d_timestamp", name)
         # this one is a parameter to the project filter, so don't dot-ify it
         #name = re.sub("^project_name$", "project.name", name)
-        name = re.sub("^full_path$", "rucio.rses[0].path", name)
-        name = re.sub("^tape_label$", "rucio.rses[0].tape_label", name)
+        name = re.sub("^full_path$", "rucio.rse.paths[any]", name)
+        name = re.sub("^tape_label$", "rucio.rses.tape_labels[any]", name)
         name = re.sub("^consumer$", "project.worker", name)
         name = re.sub("^consumer_process_id$", "project.worker", name)
         name = re.sub("^consumed_status$", "project.state", name)
@@ -724,6 +730,7 @@ class DimNode(NegatableNode):
             if self.dim == 'consumed_status' and v in ('consumed','completed'):
                 v = 'done'
             if op in ("~", "!~"):
+                v = v.strip("'")
                 yield f"'{v}'".replace('%','.*')
             else:
                 yield v
@@ -882,6 +889,7 @@ class MetaFilterNode(NodeBase):
         )
 
     def meta_render(self):
+        logging.debug(f"MetaFilter.meta_render {self}")
         yield "filter"
         yield self.filter_name
         yield "("
@@ -895,9 +903,16 @@ class MetaFilterNode(NodeBase):
                 sep = ','
         yield ")"
         yield "("
-        if self.nodes and self.nodes[0]:
+        if self.nodes and self.nodes[0] and self.nodes[0].nodes:
+            logging.debug(f"{self.nodes[0]=}\n{is_set_level_node(self.nodes[0])=}")
+            if not is_set_level_node(self.nodes[0]):
+                yield "files where"
             for t in self.nodes[0].meta_render():
                 yield t
+        else:
+            logging.debug("emtpy filter subquery")
+            # no non-location info in query, look at them all (shudder)...
+            yield "files where name ~ '.*'"
         yield ")"
         if self.where_nodes:
             yield "where"
@@ -1166,7 +1181,44 @@ class MetaCatTransformer(ParseTreeTransformer):
         node.node.negated = not node.node.negated
         return self.visit(node.node)
 
+    def _is_dimlist(self, nodes, dimlist):
+        for i in range(len(dimlist)):
+            if not isinstance(nodes[i], DimNode) or nodes[i].dim != dimlist[i]:
+                logging.debug("_is_dimlist returning False")
+                return False
+        return True
+
     def visit_AndNode(self, node):
+
+        # special case:
+        #        snapshot_id 12082 
+        #    and snapshot_file_number >= 599 
+        #    and snapshot_file_number <= 797
+        # make it snapshot id 12082 with offset 599 limit 198
+        if ( node.nodes and 
+             len(node.nodes) == 3 and 
+             self._is_dimlist(
+                node.nodes, 
+                [
+                    "snapshot_id",
+                    "snapshot_file_number",
+                    "snapshot_file_number"
+                ]
+             )
+          ):
+            if node.nodes[1].op == ">=" and node.nodes[2].op == "<=":
+                low = int(node.nodes[1].value)
+                nvals = int(node.nodes[2].value) - low
+            else:
+                low = int(node.nodes[2].value)
+                nvals = int(node.nodes[1].value) - low
+            return WithNode( node.nodes[0], {"offset":low, "limit":nvals})
+
+        setconvert = any([ isinstance(n, SetNode) for n in node.nodes])
+        if setconvert:
+            node = SetNode("union" if node.negated else "intersection", *node.nodes )
+            return self.visit(node)
+
         if node.negated:
             for n in node.nodes:
                 n.negated = not n.negated
@@ -1188,12 +1240,19 @@ class MetaCatTransformer(ParseTreeTransformer):
             return node
 
     def visit_OrNode(self, node):
+        setconvert = any([ isinstance(n, SetNode) for n in node.nodes])
+
+        if setconvert:
+            node = SetNode("intersection" if node.negated else "union", *node.nodes )
+            return self.visit(node)
+
         if node.negated:
             # DeMorgan is my friend...
             for n in node.nodes:
                 n.negated = not n.negated
             node = AndNode(*node.nodes)
             # print(f"vist_OrNode converted to {node}", file=sys.stderr)
+
 
         nn = []
         for i, n in enumerate(node.nodes):
@@ -1244,6 +1303,10 @@ class MetaCatTransformer(ParseTreeTransformer):
         if "stride" in node.params:
               self.nth_term = node.params["stride"]
               del node.params["stride"]
+        if "availability" in node.params:
+              # currently just ignoring... could add it to the rse terms..
+              # once the rse filter has a check
+              del node.params["availability"]
 
         return WithNode(self.visit(node.node), node.params)
 
@@ -1312,12 +1375,13 @@ class MetaCatTransformerPart2(ParseTreeTransformer):
             else:
                 del node.nodes[tohangslot]
 
-        for i  in range(len(node.nodes)):
-            # collapse union( union (...)) etc
-            if isinstance(node.nodes[i], SetNode) and node.nodes[i].op == node.op:
-                self.modified = True
-                node.nodes.extend(node.nodes[i].nodes)
-                del node.nodes[i] 
+        for rep in range(4):
+            for i  in range(len(node.nodes)):
+                # collapse union( union (...)) etc
+                if isinstance(node.nodes[i], SetNode) and node.nodes[i].op == node.op:
+                    self.modified = True
+                    node.nodes.extend(node.nodes[i].nodes)
+                    del node.nodes[i] 
 
         # fix 'join(files something, files where)'
         if (

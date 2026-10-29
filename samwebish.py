@@ -523,13 +523,13 @@ class Files(ClientCacheMixin):
         metadata = mcclient.get_file(
             name=name, namespace=self.namespace, with_metadata=True
         )
-        converted_metadata = self.mcc.convert_all_mc_sam(metadata)
+        converted_metadata = self.mcc.convert_all_sam_mc(metadata, namespace=self.namespace)
         if format == "json":
             return json.dumps(converted_metadata)
         else:
             return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
 
-    def traverse_linage(self, request: Request, mcclient, name, ltype, raw=False):
+    def traverse_lineage(self, request: Request, mcclient, name, ltype, raw=False):
         data = mcclient.get_file(
             name=name, namespace=self.namespace, with_provenance=True
         )
@@ -541,7 +541,7 @@ class Files(ClientCacheMixin):
         else:
             res.extend(res1)
         for fid in res1:
-            cname = res1.split(":")[1]
+            cname = fid.split(":")[1]
             nextgen = self.traverse_lineage(mcclient, cname, ltype, raw)
             if raw and len(nextgen == 0):
                 res.append(f"{self.namespace}:{cname}")
@@ -557,8 +557,9 @@ class Files(ClientCacheMixin):
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client(request)
         data = mcclient.get_file(
-            name=file, namespace=self.namespace, with_provenance=True
+            name=name, namespace=self.namespace, with_provenance=True
         )
+        res = []
         if ltype in {"parents", "children"}:
             res = data[ltype]
         if ltype == "ancestors":

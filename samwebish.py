@@ -1016,18 +1016,21 @@ class Api(ClientCacheMixin):
     ):
         ddclient = self.client_cache.getdd_client(request)
         mcclient = self.client_cache.getmc_client(request)
+        q = None
         if defname:
             q = f"files selected by {self.namespace}:{defname}"
         if def_id:
             q = f"files selected by {self.namespace}:{def_id}"
         if snapshot_id:
             q = f"files from {self.namespace}:snapshot_{snapshot_id}"
+        if not q:
+            raise HTTPException(400, detail=f"One of defname, def_id, snapshot_id requiered")
         try:
             files = list(mcclient.query(q))
         except BadRequestError:
             raise HTTPException(404, f"Defname {defname} not found")
         sid = f"{self.namespace}:snapshot_for_project_{name}"
-        logger.info(f"startProject: {q=} {sid=} {files=}")
+        logger.info(f"startProject: {q=} {sid=} {files=}") # drop for production
         ds = mcclient.create_dataset(sid)
         mcclient.add_files(sid, files)
         p = ddclient.create_project(files, project_attributes={"name": name}, query=q)
@@ -1039,6 +1042,8 @@ class Api(ClientCacheMixin):
     def findProject(self, experiment, name, request: Request):
         ddclient = self.client_cache.getdd_client(request)
         pl = list(ddclient.list_projects(attributes={"name": name}))
+        if not pl:
+            raise HTTPException(404, "Project not found")
         p = pl[0]
         b = request.base_url
         return f"{self.base}/sam/{experiment}/api/project/id/{p['project_id']}"

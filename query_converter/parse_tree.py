@@ -1181,6 +1181,7 @@ class MetaCatTransformer(ParseTreeTransformer):
         node.node.negated = not node.node.negated
         return self.visit(node.node)
 
+
     def _is_dimlist(self, nodes, dimlist):
         for i in range(len(dimlist)):
             if not isinstance(nodes[i], DimNode) or nodes[i].dim != dimlist[i]:
@@ -1318,16 +1319,23 @@ class MetaCatTransformer(ParseTreeTransformer):
         return None
 
     def visit_IsRelativeOfNode(self, node):
-        if node.subtree:
-            if self.parent_sets():
-                logging.debug(f"expanding here: {repr(node)}")
-                return IsRelativeOfNode(node.relation, self.visit(node.subtree))
+        if not node.subtree:
+            return None
+        # propogate negation through the parentage
+        if self.negated:
+            node.subtree.negated = not node.subtree.negated
+            self.negated = False
 
+        node = IsRelativeOfNode(node.relation, self.visit(node.subtree))
+        if self.parent_sets():
+            logging.debug(f"expanding here: {repr(node)}")
+            return node
+        else:
             logging.debug(f"bumping up: {repr(node)}")
             self.parentage_terms.append(
                 IsRelativeOfNode(node.relation, self.visit(node.subtree))
             )
-        return None
+            return None
 
 
 class MetaCatTransformerPart2(ParseTreeTransformer):

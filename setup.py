@@ -29,7 +29,7 @@ setup(
         "metacat-client",
         "datadispatcher-client",
         "rucio-clients",
-	"typing_inspect",
-	"python-multipart",
+        "typing_inspect",
+        "python-multipart",
     ],
 )

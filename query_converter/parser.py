@@ -213,17 +213,19 @@ class ValidateTree(ParseTreeVisitor):
         return self.generic_visit(node)
 
 
+parser_lock = threading.Lock()
+
 # The parser isn't really threadsafe (primarily because of memoization),
 # so serialize access
 def parse_string(s):
+    global parser_lock
     if not s:
         raise DimParserError("Dimensions string is empty")
     try:
         s = s.encode('ascii').decode('UTF-8')
     except UnicodeEncodeError:
         raise DimParserError("Dimensions contain invalid (non-ascii) characters")
-    #with samutil.parser.lock:
-    if True:
+    with parser_lock:
         import sys
         # complicated expressions can exceed the standard recursion limit
         recursionlimit = sys.getrecursionlimit()

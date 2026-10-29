@@ -1,5 +1,5 @@
-import .parser
-from .parse_tree import SAM_query_to_MetaCat
+import query_converter.parser
+from query_converter.parse_tree import SAM_query_to_MetaCat
 import logging
 
 if __name__ == "__main__":

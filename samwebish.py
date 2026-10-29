@@ -356,7 +356,7 @@ class Definitions(ClientCacheMixin):
         group="",
         after="",
         before="",
-        rformat="",
+        format="",
     ): # pylint: disable=unused-argument
         """ list definitions """
         client = self.client_cache.getmc_client(request)
@@ -409,12 +409,12 @@ class Definitions(ClientCacheMixin):
         "/sam/{experiment}/api/definitions/name/{defname}",
         response_class=responses.PlainTextResponse,
     )
-    def get(self, request: Request, experiment: MWordP, defname, rformat="json"):
+    def get(self, request: Request, experiment: MWordP, defname, format="json"):
         """ Get information on definition """
         client = self.client_cache.getmc_client(request)
         res = client.get_named_query(self.namespace, defname)
         logger.info(f"got {res=} for {defname=}")
-        if rformat == "plain":
+        if format == "plain":
             res = f"""
 Definition Name: {defname}
   Definition Id: {res['created_timestamp']}
@@ -422,6 +422,8 @@ Definition Name: {defname}
        Username: {res['creator']}
           Group: None
      Dimensions: {res['source']}"""
+        else:
+            res = json.dumps(res)
 
         return res
 
@@ -460,12 +462,12 @@ Definition Name: {defname}
         "/sam/{experiment}/api/definitions/name/{defname}/files/list",
         response_class=responses.PlainTextResponse,
     )
-    def files_list(self, request: Request, experiment: MWordP, defname="", rformat=""):
+    def files_list(self, request: Request, experiment: MWordP, defname="", format=""):
         """ list files matched by defininition """
         client = self.client_cache.getmc_client(request)
         res = list(client.query(f"files selected by {self.namespace}:{defname}"))
         logger.info(f"{res=}")
-        if rformat == "json":
+        if format == "json":
             return json.dumps(res)
         return "\n".join([e["name"] for e in res])
 
@@ -520,7 +522,7 @@ class Files(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_name_locations(
-        self, request: Request, experiment: str, name: MWordP, rformat: str = ""
+        self, request: Request, experiment: str, name: MWordP, format: str = ""
     ):
         """ get locations for file by name """
         logger.info(f"get_name_locations {name=}")
@@ -536,7 +538,7 @@ class Files(ClientCacheMixin):
             rse = dat["rse"]
             ploc = pfn.find("/", 9)
             res.append({"location": f"{rse}:{pfn[ploc:]}"})
-        if rformat and rformat == "plain":
+        if format and format == "plain":
             res = "\n".join([x["location"] for x in res])
         else:
             res = json.dumps(res)
@@ -583,7 +585,7 @@ class Files(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_name_metadata(
-        self, request: Request, experiment: MWordP, name: MWordP, rformat="plain"
+        self, request: Request, experiment: MWordP, name: MWordP, format="plain"
     ):
         """ get metadata for file by name """
         mcclient = self.client_cache.getmc_client(request)
@@ -593,7 +595,7 @@ class Files(ClientCacheMixin):
         logger.debug(f"From metacat: {metadata=}")
         converted_metadata = self.mcc.convert_all_mc_sam(metadata)
         logger.debug(f"From converter: {converted_metadata=}")
-        if rformat == "json":
+        if format == "json":
             return json.dumps(converted_metadata)
         else:
             return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
@@ -623,7 +625,7 @@ class Files(ClientCacheMixin):
         "/sam/{experiment}/api/files/name/{name}/lineage/{ltype}",
         response_class=responses.PlainTextResponse,
     )
-    def lineage(self, request: Request, name: MWordP, ltype: MWordP, rformat="plain"):
+    def lineage(self, request: Request, name: MWordP, ltype: MWordP, format="plain"):
         """ get file lineage """
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client(request)
@@ -640,7 +642,7 @@ class Files(ClientCacheMixin):
         if ltype == "rawancestors":
             res = self.traverse_lineage(request, mcclient, name, "parents", raw=True)
 
-        if rformat == "json":
+        if format == "json":
             return json.dumps(res)
         else:
             return "\n".join(res)
@@ -657,7 +659,7 @@ class Files(ClientCacheMixin):
         except AlreadyExistsError as e:
             raise HTTPException(409, detail="File already exists:") from e
         except InvalidMetadataError as e:
-            raise HTTPException(400, detail=f"Invalid metadata:") from e
+            raise HTTPException(400, detail=f"Invalid metadata: {e}") from e
 
         return ""
 
@@ -675,7 +677,7 @@ class Files(ClientCacheMixin):
             mcclient.declare_files(files=[mc_metadata], dry_run=True)
             return ""
         except:
-            raise HTTPException(400, f"Invalid metadata:") from e
+            raise HTTPException(400, detail=f"Invalid metadata: {e}") from e
 
     @router.put(
         "/sam/{experiment}/api/files/name/{name}/metadata",
@@ -738,7 +740,7 @@ class Users(ClientCacheMixin):
     @router.get(
         "/sam/{experiment}/api/users/", response_class=responses.PlainTextResponse
     )
-    def get(self, experiment: MWordP, username=None, rformat="plain", status=None):
+    def get(self, experiment: MWordP, username=None, format="plain", status=None):
         """ get user info (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
@@ -1101,10 +1103,10 @@ class Api(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def translateConstraints(
-        self, request: Request, experiment: MWordP, dims, rformat="plain"
+        self, request: Request, experiment: MWordP, dims, format="plain"
     ):
         """ list files returned by a query """
-        return Files.list(experiment, dims, rformat, request)
+        return Files.list(experiment, dims, format, request)
 
     # pylint: disable=redefined-outer-name
     @router.get(

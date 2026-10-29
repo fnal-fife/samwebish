@@ -1,14 +1,14 @@
 """routines to convert file metadata between SAM and MetaCat"""
 
-import functools
 import datetime
 
 
+# pylint: disable=unused-argument
 def convert_noop(x, md=None):
     """identity function -- no conversion"""
     return x
 
-
+# pylint: disable=unused-argument
 def convert_date_mc_sam(date, md):
     """date format convert metacat to sam"""
     dt = datetime.datetime.fromtimestamp(date)
@@ -30,14 +30,16 @@ def convert_checksums_sam_mc(checksums):
     return res
 
 
+# pylint: disable=unused-argument
 def convert_checksums_mc_sam(checksums, md):
+    """ special case: checksum conversion """
     res = []
     for ctype in checksums:
-        res.append("%s:%s" % (ctype, checksums[ctype]))
+        res.append(f"{ctype}:{checksums[ctype]}")
     return res
 
 
-g_experiment = None
+G_EXPERIMENT = None
 
 # constants for run/subrun combination
 run_scale_factors = {
@@ -50,7 +52,8 @@ run_scale_factors = {
 def convert_runs_sam_mc(runs):
     """special case: run/subrun  number conversion"""
     res = []
-    m = run_scale_factors[g_experiment]
+    m = run_scale_factors[G_EXPERIMENT]
+    # pylint: disable=unused-variable
     for r, sr, typ in runs:
         res.append(m * r + sr)
     return res
@@ -60,7 +63,7 @@ def convert_runs_mc_sam(runs, md):
     """special case: run/subrun  number conversion"""
     typ = md["metadata"].get("core.run_type", md["metadata"].get("md.type", "mc"))
     res = []
-    m = run_scale_factors[g_experiment]
+    m = run_scale_factors[G_EXPERIMENT]
     mysubruns = md["metadata"].get("core.runs_subruns", [])
     srcount = 0
     for r in runs:
@@ -82,12 +85,14 @@ def convert_parents_sam_mc(parents):
             {
                 "fid": str(i["file_id"]),
                 "name": i["file_name"],
-                "namespace": g_experiment,  # XXX possible bug, what namespace?
+                # pylint: disable=fixme
+                "namespace": G_EXPERIMENT,  # XXX possible bug, what namespace?
             }
         )
     return res
 
 
+# pylint: disable=unused-argument
 def convert_parents_mc_sam(parents, md):
     """special case: parentage conversion"""
     res = []
@@ -103,9 +108,10 @@ class MetadataConverter:
     """converts metadata between MetaCat and Sam"""
 
     def __init__(self, experiment):
-        global g_experiment
+        # pylint: disable=global-statement
+        global G_EXPERIMENT
         self.experiment = experiment
-        g_experiment = experiment
+        G_EXPERIMENT = experiment
         #
         # conversion table:
         #
@@ -225,8 +231,6 @@ class MetadataConverter:
                 "metadata:dune.campaign": "DUNE.campaign",
                 "metadata:dune.creator": "DUNE.creator",
                 "metadata:dune.requestid": "DUNE.requestid",
-                "metadata:dune.DC2_production_status": "DUNE.DC2_production_status",
-                "metadata:dune.production_status": "DUNE.production_status",
                 "metadata:dune_data.acCouple": "DUNE_data.acCouple",
                 "metadata:dune_data.calibpulsedac": "DUNE_data.calibpulsedac",
                 "metadata:dune_data.calibpulsemode": "DUNE_data.calibpulsemode",
@@ -322,13 +326,13 @@ class MetadataConverter:
     def build_inverse(self):
         """build the inverse mapping from the forward one"""
         self.conversion_sam_mc = {}
-        for k in self.conversion_mc_sam:
+        for k in self.conversion_mc_sam: # pylint: disable=consider-using-dict-items
             self.conversion_sam_mc[k] = {}
-            for k2 in self.conversion_mc_sam[k]:
-                v = self.conversion_mc_sam[k][k2]
+            for k2,v in self.conversion_mc_sam[k].items():
                 self.conversion_sam_mc[k][v] = k2
 
     def convert_all_sam_mc(self, md, namespace, prune=True):
+        """ convert full metadata SAM -> MetaCat """
         res = {"namespace": namespace, "metadata": {}}
         for k, v in md.items():
             if not k in self.conversion_sam_mc[self.experiment]:
@@ -359,12 +363,14 @@ class MetadataConverter:
 
         return res
 
+    # pylint: disable = too-many-branches
     def convert_all_mc_sam(self, md, prune=True):
+        """ convert full metadata MetaCat -> SAM """
         res = {}
         for k, v in md.items():
             if not k:
                 continue
-            if not (k in self.conversion_mc_sam[self.experiment]):
+            if not k in self.conversion_mc_sam[self.experiment]:
                 continue
             # most keys don't require conversion, except...
             converter = convert_noop
@@ -383,7 +389,7 @@ class MetadataConverter:
         # they are listed as metadata:x in the table
         for k, v in md["metadata"].items():
             converter = convert_noop
-            if not ("metadata:" + k) in self.conversion_mc_sam[self.experiment]:
+            if ("metadata:" + k) not in self.conversion_mc_sam[self.experiment]:
                 if prune or k.find(".") == -1:
                     continue
                 ck = k

@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+# pylint: disable=too-many-lines,logging-fstring-interpolation,too-many-positional-arguments,too-many-arguments,unused-argument
+
+""" Samwebish: API converter, lets SAM clients use MetaCat+DataDispatcher+Rucio """
+
 import base64
 import json
 from fastapi import (
@@ -54,12 +58,14 @@ MWordQ = Annotated[str, Query(title="Metacat Word or FID", pattern="^[-/.a-zA-Z0
 
 
 def custom_openapi():
+    """ customizes OpenAPI interface """
     if app.openapi_schema:
         return app.openapi_schema
     openapi_schema = get_openapi(
         title="Samwebish",
         version="0.0.4",
-        description="SAM API for Metacat/Rucio\n\nTo authorize, paste encoded token in Authorize popup",
+        description=("SAM API for Metacat/Rucio\n\n"
+                     "To authorize, paste encoded token in Authorize popup"),
         routes=app.routes,
     )
     openapi_schema["components"]["securitySchemes"] = {
@@ -77,6 +83,8 @@ app.openapi = custom_openapi
 # and also add "message" and "error" tags to response for Samweb client
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """ customize validation exceptions -- log them """
+    # pylint: disable=logging-fstring-interpolation
     logging.error(f"{request}: {exc}")
     exc_str = f"{exc}".replace("\n", " ").replace("   ", " ")
     content = {
@@ -93,7 +101,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # override exception handlers to include "message" as well as "detail"
 # in JSON error responses, to make samweb client happy
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException) -> Response:
+async def http_exception_handler(request: Request, exc: HTTPException) -> Response: # pylint: disable=unused-argument
+    """ 
+        custom exception handler to make SAM clients happy 
+        with "message" and "error" keys in response
+    """
     headers = getattr(exc, "headers", None)
     if not is_body_allowed_for_status_code(exc.status_code):
         return Response(status_code=exc.status_code, headers=headers)
@@ -114,12 +126,14 @@ router = APIRouter()
 # classes for authentication, client connection caching
 
 
+# pylint: disable=too-many-instance-attributes, consider-using-dict-items
 class ClientCache:
 
-    # Note: there are now 4 caches in here that work almost the same
-    #     except for the object called to create the connection.
-    #     Better might be to have one cache class that you pass the
-    #     connection creator into, and make 4 instances of that class...
+    """
+        Client connection cache -- cache open connections per client
+        also handles forwarding SciToken credentials on opening said
+        connections
+    """
 
     def __init__(self):
         self.mcccache = {}
@@ -135,15 +149,19 @@ class ClientCache:
         self.scope_user_re = re.compile("storage[^ ]*/users/([^ ]*)")
         self.token_offset = len("Bearer ")
         self.rucio_env_lock = threading.Lock()
+        self.nthcall = 0
 
-    # needs to be get_scitoken(self, request:Request):
-    # and all the methods that call it (which is most of them) need a request:Request param
-    # which they pass here, until then stubbing out for basic testgin
     def get_scitoken(
         self,
         request: Request,
     ):
         """extract scitoken from Authorization: header"""
+        # ------------
+        # all the get methods call here, so clean expired entries every so often
+        self.nthcall += 1
+        if self.nthcall > 10:
+            self.clean_expired()
+        # ------------
         logger.debug(f"headers: {dict(request.headers)}")
         authheader = request.headers.get("Authorization", "")
         if not authheader:
@@ -156,8 +174,7 @@ class ClientCache:
         if scitok:
             tp = scitok.split(".")
             return json.loads(base64.b64decode(tp[1] + "==", altchars="_-"))
-        else:
-            return {"sub": "", "scope": ""}
+        return {"sub": "", "scope": ""}
 
     def get_username(self, scitok):
         """get username from scitoken"""
@@ -173,6 +190,7 @@ class ClientCache:
         # note that this username guess isn't actually used except to log
         # into backend services...
 
+        # pylint: disable=logging-fstring-interpolation
         logger.info(f"get_username: {scitok=}")
         decoded = self.cheap_decode_token(scitok)
         logger.info(f'checking subject: {decoded["sub"]}')
@@ -185,7 +203,7 @@ class ClientCache:
         if m:
             logger.info(f"Returning: {m.group(1)}")
             return m.group(1)
-        logger.info(f"Returning: None!")
+        logger.info("Returning: None!")
         return None
 
     def getdd_client(self, request: Request):
@@ -199,6 +217,7 @@ class ClientCache:
             try:
                 self.ddccache[scitok].login_token(username, scitok)
             except:
+                # pylint: disable = raise-missing-from
                 raise HTTPException(401, "SciToken athentication failed")
             self.ddcexp[scitok] = time.time() + 300
         return self.ddccache[scitok]
@@ -215,6 +234,7 @@ class ClientCache:
             try:
                 self.mcccache[scitok].login_token(username, scitok)
             except:
+                # pylint: disable=raise-missing-from
                 raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.mccexp[scitok] = time.time() + 300
@@ -238,10 +258,12 @@ class ClientCache:
                     )
                     self.rccache[scitok].whoami()
                     del os.environ["BEARER_TOKEN"]
+                # pylint: disable=logging-fstring-interpolation
                 logger.info(f"getr_client: {self.rccache[scitok]=}")
             except:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
+                # pylint: disable=logging-fstring-interpolation, raise-missing-from
                 logger.info(f"Exception: {traceback.format_exc()}")
                 raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
@@ -268,35 +290,47 @@ class ClientCache:
                 if "BEARER_TOKEN" in os.environ:
                     del os.environ["BEARER_TOKEN"]
                 logger.info(f"Exception: {traceback.format_exc()}")
+                # pylint: disable=raise-missing-from
                 raise HTTPException(401, "SciToken athentication failed")
             # cache for 5 minutes
             self.rrpcexp[scitok] = time.time() + 300
         return self.rrpccache[scitok]
 
     def clean_expired(self):
-        # needs rucio caches!
+        """ clean expired items from cache """
         now = time.time()
         for tok in self.mccexp:
-            if self.mccexp < now:
+            if self.mccexp[tok] < now:
                 del self.mccexp[tok]
                 del self.mcccache[tok]
         for tok in self.ddcexp:
-            if self.ddcexp < now:
+            if self.ddcexp[tok] < now:
                 del self.ddcexp[tok]
                 del self.ddccache[tok]
-
+        for tok in self.rcexp:
+            if self.rcexp[tok] < now:
+                del self.rcexp[tok]
+                del self.rccache[tok]
+        for tok in self.rrpcexp:
+            if self.rrpcexp[tok] < now:
+                del self.rrpcexp[tok]
+                del self.rrpccache[tok]
 
 client_cache = ClientCache()
 
 
+# pylint: disable = too-few-public-methods
 class ClientCacheMixin:
-    def __init__(self, *args, **kwargs):
+    """ mixin to share a client cache """
+    def __init__(self):
+        """ initialize """
         self.client_cache = client_cache
         # self.namespace = "sam"
         # for testing:
         self.namespace = "mengel"
         self.default_dataset = "mengel:all"
         self.mcc = MetadataConverter(experiment=os.environ.get("SAM_EXPERIMENT", ""))
+        # pylint: disable = fixme
         # XXX needs to come from config...
         self.base = f"https://{os.uname().nodename}:8483"
 
@@ -322,8 +356,9 @@ class Definitions(ClientCacheMixin):
         group="",
         after="",
         before="",
-        format="",
-    ):
+        rformat="",
+    ): # pylint: disable=unused-argument
+        """ list definitions """
         client = self.client_cache.getmc_client(request)
         if not defname:
             defname = "*"
@@ -357,6 +392,7 @@ class Definitions(ClientCacheMixin):
         user: MWordQ,
         group=None,
     ):
+        """ Create a SAM Definition == MetaCat named_query """
         client = self.client_cache.getmc_client(request)
         mq = SAM_query_to_MetaCat(dims)
         client.create_named_query(self.namespace, defname, mq)
@@ -366,17 +402,19 @@ class Definitions(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def delete(self, experiment: MWordP, defname, request: Request):
+        """ Delete definition (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
         "/sam/{experiment}/api/definitions/name/{defname}",
         response_class=responses.PlainTextResponse,
     )
-    def get(self, request: Request, experiment: MWordP, defname, format="json"):
+    def get(self, request: Request, experiment: MWordP, defname, rformat="json"):
+        """ Get information on definition """
         client = self.client_cache.getmc_client(request)
         res = client.get_named_query(self.namespace, defname)
         logger.info(f"got {res=} for {defname=}")
-        if format == "plain":
+        if rformat == "plain":
             res = f"""
 Definition Name: {defname}
   Definition Id: {res['created_timestamp']}
@@ -392,11 +430,13 @@ Definition Name: {defname}
         response_class=responses.PlainTextResponse,
     )
     def files_count(self, experiment: MWordP, defname, request: Request):
+        """ count files currently matched by definition """
         sdict = self.summary(defname, request)
         logger.info(f"got {sdict=} {sdict['count']}")
         return str(sdict["count"])
 
     def summary(self, defname, request: Request):
+        """ give summary of files matched by defininition """
         client = self.client_cache.getmc_client(request)
         res = list(
             client.query(f"files selected by {self.namespace}:{defname}", summary="count")
@@ -408,6 +448,7 @@ Definition Name: {defname}
         response_class=responses.PlainTextResponse,
     )
     def files_summary(self, experiment: MWordP, defname, request: Request):
+        """ give summary of files matched by defininition """
         sdict = self.summary(defname, request)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
@@ -419,14 +460,14 @@ Definition Name: {defname}
         "/sam/{experiment}/api/definitions/name/{defname}/files/list",
         response_class=responses.PlainTextResponse,
     )
-    def files_list(self, request: Request, experiment: MWordP, defname="", format=""):
+    def files_list(self, request: Request, experiment: MWordP, defname="", rformat=""):
+        """ list files matched by defininition """
         client = self.client_cache.getmc_client(request)
         res = list(client.query(f"files selected by {self.namespace}:{defname}"))
         logger.info(f"{res=}")
-        if format == "json":
+        if rformat == "json":
             return json.dumps(res)
-        else:
-            return "\n".join([e["name"] for e in res])
+        return "\n".join([e["name"] for e in res])
 
 
 @cbv(router)
@@ -434,12 +475,14 @@ class Files(ClientCacheMixin):
     """dispatcher and methods for /api/files paths"""
 
     def convert_sam_query(self, dims):
+        """ convert a sam query to metacat """ 
         return SAM_query_to_MetaCat(dims)
 
     @router.get(
         "/sam/{experiment}/api/files/list", response_class=responses.PlainTextResponse
     )
     def list(self, request: Request, experiment: MWordP, dims="", fileinfo=""):
+        """ list files matched by dimension query """ 
         mquery = self.convert_sam_query(dims)
         logger.info(f"list: converted {dims=} to {mquery=}")
         client = self.client_cache.getmc_client(request)
@@ -450,9 +493,11 @@ class Files(ClientCacheMixin):
         "/sam/{experiment}/api/files/count", response_class=responses.PlainTextResponse
     )
     def count(self, experiment: MWordP, dims, request: Request):
+        """ count files matched by dimension query """ 
         return self._summary(dims, request)["count"]
 
     def _summary(self, dims, request: Request):
+        """ summarize files matched by dimension query """ 
         mquery = self.convert_sam_query(dims)
         client = self.client_cache.getmc_client(request)
         res = list(client.query(mquery, summary="count"))[0]
@@ -462,6 +507,7 @@ class Files(ClientCacheMixin):
         "/sam/{experiment}/api/files/summary", response_class=responses.PlainTextResponse
     )
     def summary(self, experiment: MWordP, dims, request: Request):
+        """ summarize files matched by dimension query """ 
         sdict = self._summary(dims, request)
         sdict["file_count"] = sdict["count"]
         sdict["total_file_size"] = sdict["total_size"]
@@ -474,8 +520,9 @@ class Files(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_name_locations(
-        self, request: Request, experiment: str, name: MWordP, format: str = ""
+        self, request: Request, experiment: str, name: MWordP, rformat: str = ""
     ):
+        """ get locations for file by name """
         logger.info(f"get_name_locations {name=}")
         rpclient = self.client_cache.getrrp_client(request)
         data = list(rpclient.list_replicas([{"scope": self.namespace, "name": name}]))
@@ -489,7 +536,7 @@ class Files(ClientCacheMixin):
             rse = dat["rse"]
             ploc = pfn.find("/", 9)
             res.append({"location": f"{rse}:{pfn[ploc:]}"})
-        if format and format == "plain":
+        if rformat and rformat == "plain":
             res = "\n".join([x["location"] for x in res])
         else:
             res = json.dumps(res)
@@ -504,6 +551,7 @@ class Files(ClientCacheMixin):
     def put_name_locations(
         self, request: Request, experiment: MWordP, file: MWordP, add="", remove=""
     ):
+        """ add locations for file by name """
         rpclient = self.client_cache.getrrp_client(request)
         mcclient = self.client_cache.getmc_client(request)
 
@@ -521,6 +569,7 @@ class Files(ClientCacheMixin):
                 metadata["checksums"]["adler32"],
                 path=path,
             )
+        # pylint: disable = fixme
         # xxx add to some dataset for rules?
         if remove:
             samloc = remove
@@ -534,8 +583,9 @@ class Files(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_name_metadata(
-        self, request: Request, experiment: MWordP, name: MWordP, format="plain"
+        self, request: Request, experiment: MWordP, name: MWordP, rformat="plain"
     ):
+        """ get metadata for file by name """
         mcclient = self.client_cache.getmc_client(request)
         metadata = mcclient.get_file(
             name=name, namespace=self.namespace, with_metadata=True
@@ -543,12 +593,13 @@ class Files(ClientCacheMixin):
         logger.debug(f"From metacat: {metadata=}")
         converted_metadata = self.mcc.convert_all_mc_sam(metadata)
         logger.debug(f"From converter: {converted_metadata=}")
-        if format == "json":
+        if rformat == "json":
             return json.dumps(converted_metadata)
         else:
             return "\n".join([f"{k:>20}:\t{v}" for k, v in converted_metadata.items()])
 
     def traverse_lineage(self, request: Request, mcclient, name, ltype, raw=False):
+        """ get file lineage """
         data = mcclient.get_file(
             name=name, namespace=self.namespace, with_provenance=True
         )
@@ -561,7 +612,7 @@ class Files(ClientCacheMixin):
             res.extend(res1)
         for fid in res1:
             cname = fid.split(":")[1]
-            nextgen = self.traverse_lineage(mcclient, cname, ltype, raw)
+            nextgen = self.traverse_lineage(request, mcclient, cname, ltype, raw)
             if raw and len(nextgen == 0):
                 res.append(f"{self.namespace}:{cname}")
             else:
@@ -572,7 +623,8 @@ class Files(ClientCacheMixin):
         "/sam/{experiment}/api/files/name/{name}/lineage/{ltype}",
         response_class=responses.PlainTextResponse,
     )
-    def lineage(self, request: Request, name: MWordP, ltype: MWordP, format="plain"):
+    def lineage(self, request: Request, name: MWordP, ltype: MWordP, rformat="plain"):
+        """ get file lineage """
         # ltype is: parents, children, rawancestors
         mcclient = self.client_cache.getmc_client(request)
         data = mcclient.get_file(
@@ -582,13 +634,13 @@ class Files(ClientCacheMixin):
         if ltype in {"parents", "children"}:
             res = data[ltype]
         if ltype == "ancestors":
-            res = self.traverse_lineage(mcclient, name, "parents")
+            res = self.traverse_lineage(request, mcclient, name, "parents")
         if ltype == "descendants":
-            res = self.traverse_lineage(mcclient, name, "children")
+            res = self.traverse_lineage(request, mcclient, name, "children")
         if ltype == "rawancestors":
-            res = self.traverse_lineage(mcclient, name, "parents", raw=True)
+            res = self.traverse_lineage(request, mcclient, name, "parents", raw=True)
 
-        if format == "json":
+        if rformat == "json":
             return json.dumps(res)
         else:
             return "\n".join(res)
@@ -603,9 +655,9 @@ class Files(ClientCacheMixin):
             mc_metadata = self.mcc.convert_all_sam_mc(metadata, namespace=self.namespace)
             mcclient.declare_files(self.default_dataset, [mc_metadata], self.namespace)
         except AlreadyExistsError as e:
-            raise HTTPException(409, detail="File already exists")
+            raise HTTPException(409, detail="File already exists:") from e
         except InvalidMetadataError as e:
-            raise HTTPException(400, detail=f"Invalid metadata: {e}")
+            raise HTTPException(400, detail=f"Invalid metadata:") from e
 
         return ""
 
@@ -616,13 +668,14 @@ class Files(ClientCacheMixin):
     def validate_metadata(
         self, experiment: MWordP, metadata: Dict[str, Any], request: Request
     ):
+        """ verify metadata is valid """
         mcclient = self.client_cache.getmc_client(request)
-        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        mc_metadata = self.mcc.convert_all_sam_mc(metadata, namespace=self.namespace)
         try:
-            resp = mcclient.declare_files(files=[mc_metadata], dry_run=True)
+            mcclient.declare_files(files=[mc_metadata], dry_run=True)
             return ""
         except:
-            raise HTTPException(400, f"Invalid metadata: {e}")
+            raise HTTPException(400, f"Invalid metadata:") from e
 
     @router.put(
         "/sam/{experiment}/api/files/name/{name}/metadata",
@@ -631,6 +684,7 @@ class Files(ClientCacheMixin):
     def put_name_metadata(
         self, experiment: MWordP, name: MWordP, metadata: Dict[str, Any], request: Request
     ):
+        """ set metadata for file by name"""
         mcclient = self.client_cache.getmc_client(request)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         did = f"{self.default_dataset}:{name}"
@@ -644,6 +698,7 @@ class Files(ClientCacheMixin):
     def put_id_metadata(
         self, experiment: MWordP, file_id, metadata: Dict[str, Any], request: Request
     ):
+        """ set metadata for file by id """
         mcclient = self.client_cache.getmc_client(request)
         mc_metadata = self.mcc.convert_all_sam_mc(metadata)
         mcclient.update_file_metadata(mc_metadata["metadata"], fids=[file_id])
@@ -653,9 +708,11 @@ class Files(ClientCacheMixin):
         "/sam/{experiment}/api/files/name/{name}/content_status",
         response_class=responses.PlainTextResponse,
     )
+    # pylint: disable=redefined-outer-name
     def put_name_content_status(
         self, experiment: MWordP, name: MWordP, status: str, request: Request
     ):
+        """ set content status of file by name """
         mcclient = self.client_cache.getmc_client(request)
         mcclient.update_file_metadata({"core.content_status": status}, fids=[file_id])
         return ""
@@ -667,7 +724,8 @@ class Files(ClientCacheMixin):
     def put_id_content_status(
         self, experiment: MWordP, file_id, status: str, request: Request
     ):
-        mc_metadata = self.mcc.convert_all_sam_mc(metadata)
+        """ set content status of file by id """
+        mcclient = self.client_cache.getmc_client(request)
         did = f"{self.default_dataset}:{name}"
         mcclient.update_file_metadata({"core.content_status": status}, dids=[did])
         return ""
@@ -680,13 +738,15 @@ class Users(ClientCacheMixin):
     @router.get(
         "/sam/{experiment}/api/users/", response_class=responses.PlainTextResponse
     )
-    def get(self, experiment: MWordP, username=None, format="plain", status=None):
+    def get(self, experiment: MWordP, username=None, rformat="plain", status=None):
+        """ get user info (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.post(
         "/sam/{experiment}/api/users/", response_class=responses.PlainTextResponse
     )
     def post(self, experiment: MWordP, jsondata):
+        """ add user info (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
@@ -694,12 +754,14 @@ class Users(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_by_name(self, experiment: MWordP, name):
+        """ get user info by name (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
         "/sam/{experiment}/api/users/id/{uid}", response_class=responses.PlainTextResponse
     )
     def get_by_id(self, experiement, uid):
+        """ get user info by id (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.put(
@@ -707,12 +769,14 @@ class Users(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def put_by_name(self, experiment: MWordP, name: MWordP, jsondata):
+        """ set user info by name (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
     @router.put(
         "/sam/{experiment}/api/users/id/{uid}", response_class=responses.PlainTextResponse
     )
     def put_by_id(self, experiment: MWordP, uid, jsondata):
+        """ set user info by id (not implemented) """
         raise HTTPException(501, detail="Not Implemented")
 
 
@@ -725,6 +789,7 @@ class Values(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_parameters(self, experiment: MWordP, request: Request):
+        """ get list of metadata parameters """
         mcclient = self.client_cache.getmc_client(request)
         keylist = list(mcclient.report_metadata_keys())
         return "\n".join(keylist)
@@ -736,6 +801,7 @@ class Values(ClientCacheMixin):
     def post_parameters(
         self, experimient, name: MWordQ, category, data_type, request: Request
     ):
+        """ add to list of metadata parameters (ignored, just add metadata with it) """
         # don't need to pre-post parameters in MetaCat, so
         return ""
 
@@ -744,6 +810,7 @@ class Values(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get_applications(self, experiment: MWordP, request: Request):
+        """ get list of applications """
         mcclient = self.client_cache.getmc_client(request)
         vlist = mcclient.report_metadata_values("app.version")
         flist = mcclient.report_metadata_values("app.family")
@@ -764,6 +831,7 @@ class Values(ClientCacheMixin):
     def post_applications(
         self, experiment: MWordP, family, name: MWordQ, version, request: Request
     ):
+        """ extend list of applications (ignored -- just add metadata) """
         # don't need to pre-post applications in MetaCat, so
         # just say its "ok"...
         return ""
@@ -777,10 +845,12 @@ class Projects(ClientCacheMixin):
     last_project_finished = {}
 
     def __init__(self, request: Request):
+        """ initialize """
         ClientCacheMixin.__init__(self)
         self.last_process_file = Projects.last_process_file
         self.project_finished = Projects.last_project_finished
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/project/id/{project_id}/establishProcess",
         response_class=responses.PlainTextResponse,
@@ -801,10 +871,12 @@ class Projects(ClientCacheMixin):
         filelimit: Annotated[str, Form()] = None,
         schemas: Annotated[str, Form()] = None,
     ):
+        """ establish a SAM project consumer (DataDispatcher worker) """
         ddclient = self.client_cache.getdd_client(request)
         logger.info("establishProcess...")
         return ddclient.new_worker_id()
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/project/id/{project_id}/process/{process_id}/getNextFile",
         response_class=responses.PlainTextResponse,
@@ -817,6 +889,7 @@ class Projects(ClientCacheMixin):
         request: Request,
         response: Response,
     ):
+        """ get a file from a project """
         ddclient = self.client_cache.getdd_client(request)
         res = ddclient.next_file(project_id=project_id, worker_id=process_id)
         # just return the url from the first replica
@@ -828,10 +901,10 @@ class Projects(ClientCacheMixin):
             self.last_process_file[process_id] = name
             logger.info(f"getNextFile: set last_process_file {name}")
             return rdict["url"]
-        else:
-            self.project_finished[project_id] = True
-            return responses.PlainTextResponse(status_code=204, content="")
+        self.project_finished[project_id] = True
+        return responses.PlainTextResponse(status_code=204, content="")
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/project/id/{project_id}/process/{process_id}/updateFileStatus",
         response_class=responses.PlainTextResponse,
@@ -845,6 +918,7 @@ class Projects(ClientCacheMixin):
         status="consumed",
         filename=None,
     ):
+        """ update file status in a project """
         logger.info(
             f"updateFileStatus: {process_id=} {status=} {filename=} {project_id=}"
         )
@@ -871,6 +945,7 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def releaseFile(self, process_id, status, project_id, filename, request: Request):
+        """ release / declare finished with a file in a project """
         logger.info(f"releaseFile: {process_id=} {status=} {filename=} {project_id=}")
         if not filename and self.last_process_file.get(process_id, ""):
             filename = self.last_process_file[process_id]
@@ -887,14 +962,17 @@ class Projects(ClientCacheMixin):
             ddclient.file_failed(project_id, did, process_id)
         return ""
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/project/id/{project_id}/process/{process_id}/endProcess",
         response_class=responses.PlainTextResponse,
     )
     def endProcess(self, experiment: MWordP, project_id, process_id, request: Request):
+        """ end a consumer / worker in a project """
         # don't need to do this...
         return ""
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/project/id/{project_id}/endProject",
         response_class=responses.PlainTextResponse,
@@ -920,8 +998,10 @@ class Projects(ClientCacheMixin):
         project_id=None,
         status: Annotated[str, Form] = None,
     ):
+        """ set project status (ignored) """
         pass
 
+    # pylint: disable=redefined-outer-name
     @router.put(
         "/sam/{experiment}/api/project/id/{project_id}/status",
         response_class=responses.PlainTextResponse,
@@ -933,6 +1013,7 @@ class Projects(ClientCacheMixin):
         status: Annotated[str, Form()],
         request: Request,
     ):
+        """ set project status (ignored) """
         pass
 
     @router.get(
@@ -940,6 +1021,7 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def get(self, experiment: MWordP, project_id, request: Request):
+        """ get project status """
         ddclient = self.client_cache.getdd_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
@@ -948,6 +1030,7 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def dumpProject(self, experiment: MWordP, project_id, request: Request):
+        """ dump project status """
         ddclient = self.client_cache.getdd_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
@@ -956,7 +1039,9 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def summary(self, experiment: MWordP, name: MWordP, request: Request):
+        """ get project summary """
         ddclient = self.client_cache.getdd_client(request)
+        # pylint: disable = fixme
         #  xxx mimic sam Project summary?
         return json.dumps(ddclient.list_projects(attributes={"name": name})[0])
 
@@ -967,6 +1052,7 @@ class Projects(ClientCacheMixin):
     def recovery_dimensions(
         self, request: Request, experiment: MWordP, name: MWordP, useFile=0, useProcess=0
     ):
+        """ get project recovery query """
         # wimpy non process version
         return "project name minus project_status like 'com%'"
 
@@ -977,9 +1063,11 @@ class Api(ClientCacheMixin):
 
     @router.get("/sam/{experiment}/api", response_class=responses.PlainTextResponse)
     def index(self, request: Request):
+        """ announce version etc. """
         logger.info("test message")
         return f'{{"app":"samwebish", "version": {samwebish_version} }}'
 
+    # pylint: disable=redefined-outer-name
     @router.get(
         "/sam/{experiment}/api/createDefinition",
         response_class=responses.PlainTextResponse,
@@ -987,6 +1075,7 @@ class Api(ClientCacheMixin):
     def createDefinition(
         self, request: Request, experiment: MWordP, name: MWordQ, dims, user: MWordQ = ""
     ):
+        """ create / define a definition """
         return Definitions.create(self, experiment, name, dims, user, request)
 
     @router.get(
@@ -994,53 +1083,65 @@ class Api(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def deleteDefinition(self, experiment: MWordP, name: MWordQ, request: Request):
+        """ delete a definition """
         return Definitions.delete(self, experiment, name, request)
 
+    # pylint: disable=redefined-outer-name
     @router.get(
         "/sam/{experiment}/api/describeDefinition",
         response_class=responses.PlainTextResponse,
     )
     def describeDefinition(self, experiment: MWordP, name: MWordQ, request: Request):
+        """ describe a definition """
         return Definitions.get(self, experiment, name, request)
 
+    # pylint: disable=redefined-outer-name
     @router.get(
         "/sam/{experiment}/api/translateConstraints",
         response_class=responses.PlainTextResponse,
     )
     def translateConstraints(
-        self, request: Request, experiment: MWordP, dims, format="plain"
+        self, request: Request, experiment: MWordP, dims, rformat="plain"
     ):
+        """ list files returned by a query """
+        return Files.list(experiment, dims, rformat, request)
 
-        return Files.list(experiment, dims, format, request)
-
+    # pylint: disable=redefined-outer-name
     @router.get(
         "/sam/{experiment}/api/locateFile", response_class=responses.PlainTextResponse
     )
     def locateFile(self, experiment: MWordP, file, request: Request):
+        """ get a file's list of locations """
         return Files.get_name_locations(self, experiment, file, request)
 
+    # pylint: disable=redefined-outer-name
     @router.get(
         "/sam/{experiment}/api/getMetadata", response_class=responses.PlainTextResponse
     )
     def getMetadata(self, experiment: MWordP, name: MWordQ, request: Request):
+        """ get a file's metadata """
         return Files.get_name_metadata(self, experiment, name, request)
 
+    # pylint: disable=invalid-name
     @router.get(
         "/sam/{experiment}/api/dumpStation", response_class=responses.PlainTextResponse
     )
     def dumpStation(self, request: Request, experiment: MWordP, station, dump="all"):
+        """ show station information """
         ddclient = self.client_cache.getdd_client(request)
         rlst = list(ddclient.list_projects())
         logger.info(f"dumpStation: got {rlst=}")
         res = f"samwebish version {samwebish_version}\n{len(rlst)} active projects:\n"
         res += "\n".join(
             [
+                # pylint: disable=line-too-long
                 f"project {x['attributes'].get('name','')} id {x['project_id']} owner: {x['owner']} state: {x['state']} files: {len(x['file_handles'])} "
                 for x in rlst
             ]
         )
         return res
 
+    # pylint: disable=invalid-name
     @router.post(
         "/sam/{experiment}/api/startProject", response_class=responses.PlainTextResponse
     )
@@ -1057,6 +1158,7 @@ class Api(ClientCacheMixin):
         snapshot_id: Annotated[str, Form()] = None,
         group: Annotated[str, Form()] = None,
     ):
+        """ start a file delivery project """
         ddclient = self.client_cache.getdd_client(request)
         mcclient = self.client_cache.getmc_client(request)
         q = None
@@ -1068,29 +1170,32 @@ class Api(ClientCacheMixin):
             q = f"files from {self.namespace}:snapshot_{snapshot_id}"
         if not q:
             raise HTTPException(
-                400, detail=f"One of defname, def_id, snapshot_id requiered"
+                400, detail="One of defname, def_id, snapshot_id requiered"
             )
         try:
             files = list(mcclient.query(q))
         except BadRequestError:
+            # pylint: disable=raise-missing-from
             raise HTTPException(404, f"Defname {defname} not found")
         sid = f"{self.namespace}:snapshot_for_project_{name}"
         logger.info(f"startProject: {q=} {sid=} {files=}")  # drop for production
         ds = mcclient.create_dataset(sid)
         mcclient.add_files(sid, files)
+        # pylint: disable=line-too-long
         p = ddclient.create_project(files, project_attributes={"name": name}, query=q)
         return f"{self.base}/sam/{experiment}/api/project/id/{p['project_id']}"
 
+    # pylint: disable=invalid-name
     @router.get(
         "/sam/{experiment}/api/findProject", response_class=responses.PlainTextResponse
     )
     def findProject(self, experiment: MWordP, name: MWordQ, request: Request):
+        """ find a file delivery project by name """
         ddclient = self.client_cache.getdd_client(request)
         pl = list(ddclient.list_projects(attributes={"name": name}))
         if not pl:
             raise HTTPException(404, "Project not found")
         p = pl[0]
-        b = request.base_url
         return f"{self.base}/sam/{experiment}/api/project/id/{p['project_id']}"
 
 

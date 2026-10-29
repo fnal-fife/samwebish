@@ -943,7 +943,7 @@ class Api(ClientCacheMixin):
     @router.get("/sam/{experiment}/api", response_class=responses.PlainTextResponse)
     def index(self, request: Request):
         logger.info("test message")
-        return '{"app":"samwebish", "version": samwebish_version}'
+        return f'{{"app":"samwebish", "version": {samwebish_version} }}'
 
     @router.get(
         "/sam/{experiment}/api/createDefinition",

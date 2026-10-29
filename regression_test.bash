@@ -28,6 +28,7 @@ verbose_check() {
    if [ "$1" = "-v" ] 
    then 
       verbose=true
+      shift
    else
       verbose=false
    fi
@@ -115,6 +116,13 @@ make_new_file_metadata() {
 verbose_check "$@"
 
 start_server
+
+if [ "$1" = "--just-start" ] 
+then
+    sleep 3600
+    exit
+fi
+
 
 run_expecting "samweb locate-file a.fcl" "FNAL_DCACHE_DISK_TEST" "/pnfs/fnal.gov/" "a.fcl"
 run_expecting "samweb list-definitions" "tst_q_1710507530" "tst_q_1710508175"

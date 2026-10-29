@@ -355,7 +355,7 @@ class Definitions(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def delete(self, experiment, defname, request: Request):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
         "/sam/{experiment}/api/definitions/name/{defname}",
@@ -369,7 +369,7 @@ class Definitions(ClientCacheMixin):
             res = f"""
 Definition Name: {defname}
   Definition Id: {res['created_timestamp']}
-  Creation Date: {time.strftime("%Y-%M-%D %h:%m:%s", time.gmtime(res['created_timestamp']))}
+  Creation Date: {time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(res['created_timestamp']))}
        Username: {res['creator']}
           Group: None
      Dimensions: {res['source']}"""
@@ -479,7 +479,7 @@ class Files(ClientCacheMixin):
             ploc = pfn.find("/", 9)
             res.append({"location": f"{rse}:{pfn[ploc:]}"})
         if format and format == "plain":
-            res = "\n".join(res)
+            res = "\n".join([x["location"] for x in res])
         else:
             res = json.dumps(res)
 
@@ -500,13 +500,15 @@ class Files(ClientCacheMixin):
             metadata = mcclient.get_file(
                 name=file, namespace=self.namespace, with_metadata=True
             )
-            rclient.add_replica(
+            rpclient.add_replica(
                 rse,
                 self.namespace,
                 file,
                 metadata["size"],
                 metadata["checksums"]["adler32"],
+                path=path,
             )
+        # xxx add to some dataset for rules? 
         if remove:
             samloc = remove
             rse, path = samloc.split(":", 1)
@@ -656,39 +658,40 @@ class Users(ClientCacheMixin):
         "/sam/{experiment}/api/users/", response_class=responses.PlainTextResponse
     )
     def get(self, experiment, username=None, format="plain", status=None):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
+
 
     @router.post(
         "/sam/{experiment}/api/users/", response_class=responses.PlainTextResponse
     )
     def post(self, experiment, jsondata):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
         "/sam/{experiment}/api/users/name/{name}",
         response_class=responses.PlainTextResponse,
     )
     def get_by_name(self, experiment, name):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
     @router.get(
         "/sam/{experiment}/api/users/id/{uid}", response_class=responses.PlainTextResponse
     )
     def get_by_id(self, experiement, uid):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
     @router.put(
         "/sam/{experiment}/api/users/name/{name}",
         response_class=responses.PlainTextResponse,
     )
     def put_by_name(self, experiment, name, jsondata):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
     @router.put(
         "/sam/{experiment}/api/users/id/{uid}", response_class=responses.PlainTextResponse
     )
     def put_by_id(self, experiment, uid, jsondata):
-        raise NotImplementedError()
+        raise HTTPException(501, detail="Not Implemented")
 
 
 @cbv(router)

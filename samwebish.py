@@ -909,7 +909,7 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def dumpProject(self, experiment, project_id, request: Request):
-        ddclient = self.client_cache.getmc_client(request)
+        ddclient = self.client_cache.getdd_client(request)
         return json.dumps(ddclient.get_project(project_id))
 
     @router.get(
@@ -917,7 +917,7 @@ class Projects(ClientCacheMixin):
         response_class=responses.PlainTextResponse,
     )
     def summary(self, experiment, name, request: Request):
-        ddclient = self.client_cache.getmc_client(request)
+        ddclient = self.client_cache.getdd_client(request)
         #  xxx mimic sam Project summary?
         return json.dumps(ddclient.list_projects(attributes={"name": name})[0])
 

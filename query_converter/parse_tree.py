@@ -575,6 +575,7 @@ class NotNode(UnaryNode):
 
 _quotechars = re.compile("[^0-9a-zA-Z_.+%?]")
 
+_meta_quotechars = re.compile("[^0-9a-zA-Z_.]")
 
 def _quote_value(val):
     """Determine if a value should be quoted
@@ -584,6 +585,21 @@ def _quote_value(val):
     if "'" in val:
         quote = '"'
     elif val == "" or '"' in val or " " in val or _quotechars.search(val):
+        quote = "'"
+
+    if quote:
+        return "%s%s%s" % (quote, val, quote)
+    else:
+        return val
+
+def _meta_quote_value(val):
+    """Determine if a value should be quoted
+    (This function quotes more than is really necessary"""
+    quote = None
+    val = str(val)
+    if "'" in val:
+        quote = '"'
+    elif val == "" or '"' in val or " " in val or _meta_quotechars.search(val):
         quote = "'"
 
     if quote:
@@ -692,11 +708,12 @@ class DimNode(NegatableNode):
 
             def _gen():
                 i = iter(self.value)
+                sep = " "
                 yield "("  # mwm -- added parens
-                yield _quote_value(next(i))
                 for v in i:
-                    yield ","
-                    yield _quote_value(v)
+                    yield sep
+                    sep = ","
+                    yield _meta_quote_value(v)
                 yield ")"  # mwm -- added parens
 
             val = _gen()
@@ -705,7 +722,7 @@ class DimNode(NegatableNode):
         elif isinstance(self.value, NodeBase):
             val = self.value.render()
         else:
-            val = [_quote_value(self.value)]
+            val = [_meta_quote_value(self.value)]
 
         if self.negated:
             op = self.notmap[self.op]
@@ -802,7 +819,7 @@ class DefinitionNode(NodeBase):
 
     def __init__(self, defname):
         NodeBase.__init__(self)
-        self.defname = self.default_namespace + defname.replace("-", "_")
+        self.defname = self.default_namespace + defname.replace("-", "_").replace("+","_")
         self.negated = False
 
     def __str__(self):
@@ -847,6 +864,7 @@ class MetaDatasetNode(NodeBase):
 
     def meta_render(self):
         logging.debug("MetaDatasetNode.meta_render() {self.defname=}")
+        self.defname = self.defname.replace("+","_")
         yield "files from"
         if "%" in self.defname:
             yield "datasets matching"
@@ -931,6 +949,7 @@ class IsRelativeOfNode(NegatableNode):
         return cls(*tokens)
 
     def __init__(self, relation, subtree):
+        NegatableNode.__init__(self)
         self.relation = relation
         self.subtree = subtree
 
@@ -1094,6 +1113,8 @@ class MetaCatTransformer(ParseTreeTransformer):
 
     def visit(self, node):
         # bookkeeping...
+        if not node:
+            return
         if len(self.node_path) == self.ptdepth:
             self.node_path.append(node)
         else:
@@ -1277,6 +1298,7 @@ class MetaCatTransformer(ParseTreeTransformer):
             # two parter:
             # 1) save term for argument to data_dispatcher filter
             # 2) have as base files from snapshot for the project
+            node.value = node.value.replace("+","_")
             self.modified = True
             self.proj_id_term = node
             node2 = DimNode(node.dim, "=", "for_project_" + str(node.value))
@@ -1322,7 +1344,7 @@ class MetaCatTransformer(ParseTreeTransformer):
         if not node.subtree:
             return None
         # propogate negation through the parentage
-        if self.negated:
+        if node.negated:
             node.subtree.negated = not node.subtree.negated
             self.negated = False
 
